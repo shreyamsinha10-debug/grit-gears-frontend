@@ -9,6 +9,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/api_client.dart';
 import '../theme/app_theme.dart';
@@ -314,7 +315,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 TextField(controller: nameController, decoration: const InputDecoration(labelText: 'Name')),
                 const SizedBox(height: 12),
-                TextField(controller: phoneController, decoration: const InputDecoration(labelText: 'Phone'), keyboardType: TextInputType.phone),
+                TextField(controller: phoneController, decoration: const InputDecoration(labelText: 'Phone'), keyboardType: TextInputType.phone, maxLength: 10, inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
                 const SizedBox(height: 12),
                 TextField(controller: emailController, decoration: const InputDecoration(labelText: 'Email'), keyboardType: TextInputType.emailAddress),
                 const SizedBox(height: 12),

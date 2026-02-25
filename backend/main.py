@@ -20,7 +20,7 @@ from enum import Enum
 from io import BytesIO
 from zoneinfo import ZoneInfo
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Header
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -96,6 +96,12 @@ def batch_from_ist(dt: datetime) -> str:
     if 17 <= h <= 23:
         return "Ladies"
     return "Evening"  # 0-3, 12-16
+
+
+def normalize_phone(s: str) -> str:
+    """Digits only, max 10 characters (gym member phone)."""
+    digits = "".join(c for c in (s or "").strip() if c.isdigit())
+    return digits[:10]
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +187,7 @@ class Batch(str, Enum):
 
 class MemberCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
-    phone: str = Field(..., min_length=1, max_length=20)
+    phone: str = Field(..., min_length=1, max_length=10)
     email: EmailStr
     membership_type: MembershipType
     batch: Batch
@@ -312,6 +318,7 @@ class LoginResponse(BaseModel):
     token: str
     role: str
     login_id: str
+    member: MemberResponse | None = None
 
 
 class SuperAdminAdminListItem(BaseModel):
@@ -426,6 +433,61 @@ def get_gym_id(authorization: str | None = Header(None)) -> str:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
+def get_gym_id_for_attendance_or_member_get(member_id: str, authorization: str | None = Header(None)) -> str:
+    """Allow gym_admin (any member) or member (only own member_id). Returns gym_id for scoping."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authorization required")
+    token = authorization[7:].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        role = payload.get("role")
+        gym_id = payload.get("gym_id") or ""
+        if role == "gym_admin":
+            if not gym_id:
+                raise HTTPException(status_code=403, detail="Gym context missing")
+            return gym_id
+        if role == "member":
+            if payload.get("sub") != member_id:
+                raise HTTPException(status_code=403, detail="Not authorized for this member")
+            if not gym_id:
+                raise HTTPException(status_code=403, detail="Gym context missing")
+            return gym_id
+        raise HTTPException(status_code=403, detail="Gym admin or member access required")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+def get_gym_id_for_payments(
+    authorization: str | None = Header(None),
+    member_id: str | None = Query(None, alias="member_id"),
+) -> str:
+    """Allow gym_admin (any) or member (only own payments when member_id=sub)."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authorization required")
+    token = authorization[7:].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        role = payload.get("role")
+        gym_id = payload.get("gym_id") or ""
+        if role == "gym_admin":
+            if not gym_id:
+                raise HTTPException(status_code=403, detail="Gym context missing")
+            return gym_id
+        if role == "member":
+            if not member_id or payload.get("sub") != member_id:
+                raise HTTPException(status_code=403, detail="Members can only list their own payments")
+            if not gym_id:
+                raise HTTPException(status_code=403, detail="Gym context missing")
+            return gym_id
+        raise HTTPException(status_code=403, detail="Gym admin or member access required")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
 def _gym_filter(gym_id: str):
     """Return a query dict to filter by gym_id (matches both string and ObjectId in DB)."""
     from bson import ObjectId
@@ -454,6 +516,27 @@ async def auth_login(body: LoginRequest):
         payload = {"sub": login_id, "role": "gym_admin", "gym_id": str(admin_doc["gym_id"]), "gym_name": gym_name, "exp": datetime.now(timezone.utc) + timedelta(days=7)}
         token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
         return LoginResponse(token=token, role="gym_admin", login_id=login_id)
+
+    # Member login: by phone (login_id) + password
+    phone_norm = normalize_phone(login_id)
+    if phone_norm:
+        member_doc = await members_collection.find_one({"phone": phone_norm})
+        if member_doc:
+            password_hash = member_doc.get("password_hash") or ""
+            if password_hash and pwd_context.verify(password, password_hash):
+                if (member_doc.get("status") or "Active") != "Active":
+                    raise HTTPException(status_code=403, detail="Membership is not active")
+                member_id = str(member_doc["_id"])
+                gym_id = str(member_doc.get("gym_id") or "")
+                if not gym_id:
+                    raise HTTPException(status_code=403, detail="Member gym not set")
+                payload = {"sub": member_id, "role": "member", "gym_id": gym_id, "exp": datetime.now(timezone.utc) + timedelta(days=7)}
+                token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+                date_ist_str = today_ist().strftime("%Y-%m-%d")
+                att_doc = await attendance_collection.find_one({"member_id": member_id, "date_ist": date_ist_str})
+                attendance_map = {member_id: att_doc} if att_doc else None
+                member_resp = _doc_to_member_response(member_doc, attendance_map=attendance_map)
+                return LoginResponse(token=token, role="member", login_id=login_id, member=member_resp)
 
     raise HTTPException(status_code=401, detail="Invalid login or password")
 
@@ -648,8 +731,10 @@ async def create_member(member: MemberCreate, gym_id: str = Depends(get_gym_id))
     from datetime import timezone
     doc = member.model_dump()
     doc["gym_id"] = gym_id
-    # Normalize phone for consistent lookup (member login uses by-phone)
-    doc["phone"] = (doc.get("phone") or "").strip()
+    # Normalize phone: digits only, max 10 chars (member login uses by-phone)
+    doc["phone"] = normalize_phone(doc.get("phone") or "")
+    if not doc["phone"]:
+        raise HTTPException(status_code=400, detail="Phone must contain at least one digit")
     doc["created_at"] = datetime.now(timezone.utc)
     mt = doc["membership_type"].value if isinstance(doc["membership_type"], MembershipType) else doc["membership_type"]
     doc["workout_schedule"] = doc.get("workout_schedule")
@@ -688,7 +773,7 @@ async def create_member(member: MemberCreate, gym_id: str = Depends(get_gym_id))
 
 
 @app.get("/members/{member_id}", response_model=MemberResponse)
-async def get_member_by_id(member_id: str, gym_id: str = Depends(get_gym_id)):
+async def get_member_by_id(member_id: str, gym_id: str = Depends(get_gym_id_for_attendance_or_member_get)):
     """Get a single member by ID. Member must belong to current gym."""
     from bson import ObjectId
     try:
@@ -709,7 +794,7 @@ async def get_member_by_id(member_id: str, gym_id: str = Depends(get_gym_id)):
 
 
 @app.get("/members/{member_id}/attendance-stats")
-async def member_attendance_stats(member_id: str, gym_id: str = Depends(get_gym_id)):
+async def member_attendance_stats(member_id: str, gym_id: str = Depends(get_gym_id_for_attendance_or_member_get)):
     """Total visits, visits this month, and avg workout duration (minutes) for a member."""
     from bson import ObjectId
     try:
@@ -811,7 +896,9 @@ async def update_member(member_id: str, body: MemberUpdate, gym_id: str = Depend
     if body.name is not None:
         update["name"] = body.name
     if body.phone is not None:
-        update["phone"] = body.phone
+        update["phone"] = normalize_phone(body.phone)
+        if not update["phone"]:
+            raise HTTPException(status_code=400, detail="Phone must contain at least one digit")
     if body.email is not None:
         update["email"] = body.email
     if body.membership_type is not None:
@@ -967,7 +1054,7 @@ def _to_date(v):
 # ---------- Attendance: check-in/check-out (IST), by date, summary ----------
 
 @app.post("/attendance/check-in/{member_id}", response_model=AttendanceRecord)
-async def check_in(member_id: str, gym_id: str = Depends(get_gym_id)):
+async def check_in(member_id: str, gym_id: str = Depends(get_gym_id_for_attendance_or_member_get)):
     """Record check-in in IST. One check-in per member per calendar day (IST)."""
     from bson import ObjectId
     from datetime import timezone
@@ -1152,7 +1239,7 @@ async def attendance_by_date_range(date_from: str, date_to: str, gym_id: str = D
 
 
 @app.post("/attendance/check-out/{member_id}", response_model=AttendanceRecord)
-async def check_out(member_id: str, gym_id: str = Depends(get_gym_id)):
+async def check_out(member_id: str, gym_id: str = Depends(get_gym_id_for_attendance_or_member_get)):
     """Record check-out for today's check-in (IST)."""
     from bson import ObjectId
     from datetime import timezone
@@ -1243,7 +1330,7 @@ async def mark_inactive_by_attendance(gym_id: str = Depends(get_gym_id)):
 # ---------- Payments: list, fees summary, log monthly, mark paid ----------
 
 @app.get("/payments", response_model=list[PaymentResponse])
-async def list_payments(member_id: str | None = None, status: str | None = None, limit: int = 1000, gym_id: str = Depends(get_gym_id)):
+async def list_payments(member_id: str | None = None, status: str | None = None, limit: int = 1000, gym_id: str = Depends(get_gym_id_for_payments)):
     """List payments. Filter by member_id and/or status (Paid/Due/Overdue). Capped at 1000 for performance."""
     from datetime import timezone
     q = _gym_filter(gym_id)

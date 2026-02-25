@@ -224,6 +224,23 @@ class _LoginScreenState extends State<LoginScreen> {
           );
           return;
         }
+        if (role == 'member' && token != null && token.isNotEmpty) {
+          await SecureStorage.setAuthToken(token);
+          await SecureStorage.setAuthRole('member');
+          ApiClient.setAuthToken(token);
+          final memberMap = authData['member'] as Map<String, dynamic>?;
+          if (!mounted) return;
+          setState(() => _loading = false);
+          if (memberMap != null) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => MemberHomeScreen(member: memberMap)),
+            );
+          } else {
+            setState(() => _error = 'Member data missing');
+          }
+          return;
+        }
       }
 
       // 1) Default admin: 9999999999 / 999999 – use auth API to get token (with gym_id) so dashboard calls are scoped

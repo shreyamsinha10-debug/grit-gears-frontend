@@ -6,6 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../core/secure_storage.dart';
@@ -121,6 +122,8 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
                   prefixIcon: Icon(Icons.phone),
                 ),
                 keyboardType: TextInputType.phone,
+                maxLength: 10,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 onChanged: (_) => setState(() => _error = null),
               ),
               if (!_otpSent) ...[

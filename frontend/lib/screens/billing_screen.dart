@@ -8,6 +8,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../core/api_client.dart';
@@ -211,6 +212,8 @@ class _WalkInTabState extends State<_WalkInTab> {
                   TextField(
                     controller: _phone,
                     keyboardType: TextInputType.phone,
+                    maxLength: 10,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                     decoration: InputDecoration(
                       labelText: 'Phone',
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),

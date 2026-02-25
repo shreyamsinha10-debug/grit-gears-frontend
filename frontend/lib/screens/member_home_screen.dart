@@ -45,6 +45,11 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
   @override
   void initState() {
     super.initState();
+    final todayStatus = widget.member['today_status'] as Map<String, dynamic>?;
+    if (todayStatus != null) {
+      _checkedInToday = todayStatus['checked_in'] == true;
+      _checkedOutToday = todayStatus['checked_out'] == true;
+    }
     _loadPayments();
     _loadFullMember();
     _loadStats();
@@ -74,7 +79,14 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
       final r = await ApiClient.instance.get('/members/$mid', useCache: false);
       if (mounted && r.statusCode == 200) {
         final map = jsonDecode(r.body) as Map<String, dynamic>?;
-        setState(() => _fullMember = map);
+        setState(() {
+          _fullMember = map;
+          final todayStatus = map?['today_status'] as Map<String, dynamic>?;
+          if (todayStatus != null) {
+            _checkedInToday = todayStatus['checked_in'] == true;
+            _checkedOutToday = todayStatus['checked_out'] == true;
+          }
+        });
       }
     } catch (_) {}
   }

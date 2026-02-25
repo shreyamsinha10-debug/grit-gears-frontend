@@ -232,8 +232,11 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                     decoration: _inputDecoration('Phone', 'Phone number'),
                     style: GoogleFonts.poppins(color: AppTheme.onSurface, fontSize: 16),
                     keyboardType: TextInputType.phone,
+                    maxLength: 10,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                     validator: (v) {
                       if (v == null || v.trim().isEmpty) return 'Phone is required';
+                      if (v.length != 10) return 'Enter 10-digit phone number';
                       return null;
                     },
                   ),

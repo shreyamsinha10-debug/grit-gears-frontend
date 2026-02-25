@@ -8,6 +8,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../core/api_client.dart';
@@ -133,6 +134,8 @@ class _MemberLoginScreenState extends State<MemberLoginScreen> {
               TextField(
                 controller: _phoneController,
                 keyboardType: TextInputType.phone,
+                maxLength: 10,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 decoration: InputDecoration(
                   labelText: 'Phone',
                   border: const OutlineInputBorder(),
