@@ -129,6 +129,42 @@ Examples:
 
 The built APK will use this URL for all API calls.
 
+---
+
+## Host the web app on Vercel
+
+You can host the **Flutter web app** on Vercel and keep using your **existing backend on Railway** (e.g. `https://gymsaas-production-b4a0.up.railway.app`). The app is already configured to use that URL by default; no backend code change is needed. The backend allows all origins (`allow_origins=["*"]`), so the Vercel domain can call the API.
+
+### Option A – Vercel builds the app (simplest, but slow first build)
+
+1. Go to [vercel.com](https://vercel.com) and sign in with GitHub.
+2. **Add New** → **Project** → import your **GymSaaS** repo.
+3. Configure the project:
+   - **Root Directory**: click **Edit** → set to **`frontend`** (so Vercel uses the Flutter app).
+   - **Build Command**, **Install Command**, **Output Directory**: leave as in `frontend/vercel.json` (Vercel will use it). The install step downloads the Flutter SDK (~1 GB), so the first build can take 10–15 minutes.
+   - **Output Directory**: `build/web` (from vercel.json).
+4. Click **Deploy**. When it finishes, you get a URL like `https://gymsaas-xxx.vercel.app`. The web app will call your Railway backend automatically.
+
+### Option B – GitHub Actions builds and deploys to Vercel (faster, more reliable)
+
+This avoids installing Flutter on Vercel by building in GitHub Actions and deploying the built files.
+
+1. **Create a Vercel project** (to get IDs):
+   - Vercel → **Add New** → **Project** → import your repo.
+   - Set **Root Directory** to **`frontend`**.
+   - Deploy once (can cancel after it starts, or let it run). Go to **Project Settings** → note the **Project ID**. Under **General** or your team, note the **Org ID** (Team ID or your user id from the URL).
+
+2. **Create a Vercel token**: [vercel.com/account/tokens](https://vercel.com/account/tokens) → **Create** → copy the token.
+
+3. **Add GitHub secrets** (repo → Settings → Secrets and variables → Actions):
+   - `VERCEL_TOKEN` = the token from step 2.
+   - `VERCEL_ORG_ID` = your Org/Team ID.
+   - `VERCEL_PROJECT_ID` = the Project ID from step 1.
+
+4. **Workflow file**: A workflow is provided at `.github/workflows/deploy-web-vercel.yml`. Push it to your repo (e.g. with your next commit). On every push to `main`, the workflow builds the Flutter web app and deploys it to Vercel.
+
+After deployment, the web app URL (e.g. `https://gymsaas-xxx.vercel.app`) uses the same Railway backend; no extra configuration needed.
+
 ### Step 3: Get the APK and share it
 
 After the build finishes, the APK is at:

@@ -1,0 +1,9 @@
+{
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "buildCommand": "flutter pub get && flutter build web --release",
+  "installCommand": "curl -o flutter_sdk.zip https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.24.5-stable.zip && unzip -q flutter_sdk.zip && export PATH=\"$PATH:$(pwd)/flutter/bin\" && flutter doctor",
+  "outputDirectory": "build/web",
+  "framework": null
+}
