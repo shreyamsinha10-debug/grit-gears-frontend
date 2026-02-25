@@ -20,11 +20,13 @@ from enum import Enum
 from io import BytesIO
 from zoneinfo import ZoneInfo
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field, field_serializer
+import jwt
+from passlib.context import CryptContext
 
 # ---------------------------------------------------------------------------
 # Configuration & database
@@ -36,6 +38,8 @@ COLLECTION_MEMBERS = "gym_members"
 COLLECTION_ATTENDANCE = "attendance_logs"
 COLLECTION_PAYMENTS = "payments"
 COLLECTION_INVOICES = "invoices"
+COLLECTION_GYMS = "gyms"
+COLLECTION_GYM_ADMINS = "gym_admins"
 
 # Fee constants (used for registration, monthly dues, walk-in first bill)
 REGISTRATION_FEE = 1000
@@ -50,6 +54,15 @@ members_collection = db[COLLECTION_MEMBERS]
 attendance_collection = db[COLLECTION_ATTENDANCE]
 payments_collection = db[COLLECTION_PAYMENTS]
 invoices_collection = db[COLLECTION_INVOICES]
+gyms_collection = db[COLLECTION_GYMS]
+gym_admins_collection = db[COLLECTION_GYM_ADMINS]
+
+# Super admin auth
+SUPER_ADMIN_LOGIN_ID = os.environ.get("SUPER_ADMIN_LOGIN_ID", "Dertz@info987656")
+SUPER_ADMIN_PASSWORD = os.environ.get("SUPER_ADMIN_PASSWORD", "#include<376494")
+JWT_SECRET = os.environ.get("JWT_SECRET", "gym-saas-jwt-secret-change-in-production")
+JWT_ALGORITHM = "HS256"
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +256,37 @@ class AttendanceRecord(BaseModel):
         return dt.isoformat() if dt else None
 
 
+# ---------- Auth & Super Admin ----------
+class LoginRequest(BaseModel):
+    login_id: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1)
+
+
+class LoginResponse(BaseModel):
+    token: str
+    role: str
+    login_id: str
+
+
+class SuperAdminAdminListItem(BaseModel):
+    id: str
+    gym_id: str
+    gym_name: str
+    login_id: str
+    is_active: bool
+    created_at: datetime
+
+
+class SuperAdminCreateAdminBody(BaseModel):
+    gym_name: str = Field(..., min_length=1)
+    admin_login_id: str = Field(..., min_length=1)
+    admin_password: str = Field(..., min_length=6)
+
+
+class SuperAdminPatchAdminBody(BaseModel):
+    is_active: bool | None = None
+
+
 # ---------- Notifications (utils.send_notification) ----------
 def _notify_registration(name: str, email: str, phone: str):
     from utils import send_notification
@@ -273,6 +317,131 @@ def root():
 def version():
     """App can check this to prompt user to update if current version < min_app_version."""
     return {"min_app_version": MIN_APP_VERSION, "api_version": "1"}
+
+
+# ---------- Auth: login (super_admin / gym_admin) ----------
+def _encode_super_admin_jwt() -> str:
+    from datetime import timezone
+    payload = {"sub": SUPER_ADMIN_LOGIN_ID, "role": "super_admin", "exp": datetime.now(timezone.utc) + timedelta(days=7)}
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def _require_super_admin(authorization: str | None = Header(None)):
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    token = authorization[7:].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        if payload.get("role") != "super_admin":
+            raise HTTPException(status_code=403, detail="Super admin only")
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+@app.post("/auth/login", response_model=LoginResponse)
+async def auth_login(body: LoginRequest):
+    login_id = (body.login_id or "").strip()
+    password = body.password or ""
+
+    if login_id == SUPER_ADMIN_LOGIN_ID and password == SUPER_ADMIN_PASSWORD:
+        return LoginResponse(token=_encode_super_admin_jwt(), role="super_admin", login_id=login_id)
+
+    from datetime import timezone
+    admin_doc = await gym_admins_collection.find_one({"login_id": login_id})
+    if admin_doc and pwd_context.verify(password, admin_doc.get("password_hash", "")):
+        if not admin_doc.get("is_active", True):
+            raise HTTPException(status_code=403, detail="Account disabled")
+        gym = await gyms_collection.find_one({"_id": admin_doc["gym_id"]}) if admin_doc.get("gym_id") else None
+        gym_name = gym.get("name", "") if gym else ""
+        payload = {"sub": login_id, "role": "gym_admin", "gym_id": str(admin_doc["gym_id"]), "gym_name": gym_name, "exp": datetime.now(timezone.utc) + timedelta(days=7)}
+        token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+        return LoginResponse(token=token, role="gym_admin", login_id=login_id)
+
+    raise HTTPException(status_code=401, detail="Invalid login or password")
+
+
+# ---------- Super Admin: list/create/patch gym admins ----------
+@app.get("/super-admin/admins", response_model=list[SuperAdminAdminListItem])
+async def super_admin_list_admins(_: dict = Depends(_require_super_admin)):
+    cursor = gym_admins_collection.find().sort("created_at", -1)
+    out = []
+    async for doc in cursor:
+        gym_id = doc.get("gym_id")
+        gym_name = ""
+        if gym_id:
+            g = await gyms_collection.find_one({"_id": gym_id})
+            if g:
+                gym_name = g.get("name", "")
+        out.append(SuperAdminAdminListItem(
+            id=str(doc["_id"]),
+            gym_id=str(gym_id) if gym_id else "",
+            gym_name=gym_name,
+            login_id=doc.get("login_id", ""),
+            is_active=bool(doc.get("is_active", True)),
+            created_at=doc.get("created_at", datetime.now(IST)),
+        ))
+    return out
+
+
+@app.post("/super-admin/admins", response_model=SuperAdminAdminListItem)
+async def super_admin_create_admin(body: SuperAdminCreateAdminBody, _: dict = Depends(_require_super_admin)):
+    from bson import ObjectId
+    from datetime import timezone
+    existing = await gym_admins_collection.find_one({"login_id": body.admin_login_id.strip()})
+    if existing:
+        raise HTTPException(status_code=400, detail="Login ID already in use")
+    gym_doc = {"name": body.gym_name.strip(), "created_at": datetime.now(timezone.utc)}
+    gym_result = await gyms_collection.insert_one(gym_doc)
+    gym_id = gym_result.inserted_id
+    password_hash = pwd_context.hash(body.admin_password)
+    admin_doc = {
+        "gym_id": gym_id,
+        "login_id": body.admin_login_id.strip(),
+        "password_hash": password_hash,
+        "is_active": True,
+        "created_at": datetime.now(timezone.utc),
+    }
+    admin_result = await gym_admins_collection.insert_one(admin_doc)
+    return SuperAdminAdminListItem(
+        id=str(admin_result.inserted_id),
+        gym_id=str(gym_id),
+        gym_name=body.gym_name.strip(),
+        login_id=body.admin_login_id.strip(),
+        is_active=True,
+        created_at=admin_doc["created_at"],
+    )
+
+
+@app.patch("/super-admin/admins/{admin_id}", response_model=SuperAdminAdminListItem)
+async def super_admin_patch_admin(admin_id: str, body: SuperAdminPatchAdminBody, _: dict = Depends(_require_super_admin)):
+    from bson import ObjectId
+    try:
+        oid = ObjectId(admin_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid admin ID")
+    doc = await gym_admins_collection.find_one({"_id": oid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Admin not found")
+    if body.is_active is not None:
+        await gym_admins_collection.update_one({"_id": oid}, {"$set": {"is_active": body.is_active}})
+        doc = await gym_admins_collection.find_one({"_id": oid})
+    gym_id = doc.get("gym_id")
+    gym_name = ""
+    if gym_id:
+        g = await gyms_collection.find_one({"_id": gym_id})
+        if g:
+            gym_name = g.get("name", "")
+    return SuperAdminAdminListItem(
+        id=str(doc["_id"]),
+        gym_id=str(gym_id) if gym_id else "",
+        gym_name=gym_name,
+        login_id=doc.get("login_id", ""),
+        is_active=bool(doc.get("is_active", True)),
+        created_at=doc.get("created_at", datetime.now(IST)),
+    )
 
 
 # ---------- Members: CRUD, lookup, attendance stats ----------

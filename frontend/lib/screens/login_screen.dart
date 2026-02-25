@@ -16,6 +16,7 @@ import '../core/secure_storage.dart';
 import '../theme/app_theme.dart';
 import 'admin_dashboard_screen.dart';
 import 'member_home_screen.dart';
+import 'super_admin_screen.dart';
 
 /// Single login screen: Email or Mobile + Password. Routes to Admin or Member based on credentials.
 class LoginScreen extends StatefulWidget {
@@ -187,7 +188,43 @@ class _LoginScreenState extends State<LoginScreen> {
     final phone = _toPhone(emailOrPhone);
 
     try {
-      // 0) Default admin: 9999999999 / 999999
+      // 0) Try unified auth first (super_admin / gym_admin)
+      final authRes = await ApiClient.instance.post(
+        '/auth/login',
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'login_id': emailOrPhone.trim(), 'password': password}),
+      );
+      if (authRes.statusCode >= 200 && authRes.statusCode < 300) {
+        final authData = jsonDecode(authRes.body) as Map<String, dynamic>;
+        final role = authData['role'] as String?;
+        final token = authData['token'] as String?;
+        final loginId = authData['login_id'] as String? ?? emailOrPhone.trim();
+        if (role == 'super_admin' && token != null && token.isNotEmpty) {
+          await SecureStorage.setAuthToken(token);
+          await SecureStorage.setAuthRole('super_admin');
+          if (!mounted) return;
+          setState(() => _loading = false);
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const SuperAdminScreen()),
+          );
+          return;
+        }
+        if (role == 'gym_admin' && token != null && token.isNotEmpty) {
+          await SecureStorage.setAuthToken(token);
+          await SecureStorage.setAuthRole('gym_admin');
+          await SecureStorage.setAdminPhone(loginId);
+          if (!mounted) return;
+          setState(() => _loading = false);
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
+          );
+          return;
+        }
+      }
+
+      // 1) Default admin: 9999999999 / 999999
       if (phone == _defaultAdminPhone && password == _defaultAdminOtp) {
         await SecureStorage.setAdminPhone(_defaultAdminPhone);
         if (!mounted) return;

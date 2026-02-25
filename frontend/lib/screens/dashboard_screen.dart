@@ -555,11 +555,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildBody(BuildContext context) {
     return _loading
-        ? ListView(
-            padding: const EdgeInsets.all(16),
-            children: const [
-              SkeletonMemberList(itemCount: 8),
-            ],
+        ? const Padding(
+            padding: EdgeInsets.all(16),
+            child: SkeletonMemberList(itemCount: 8),
           )
         : _error != null
               ? Center(

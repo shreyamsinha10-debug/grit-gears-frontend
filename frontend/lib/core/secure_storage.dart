@@ -22,6 +22,27 @@ class SecureStorage {
   static const String _keyAdminPhone = 'admin_phone';
   static const String _keyAdminPin = 'admin_pin';
   static const String _keyThemeDark = 'theme_dark';
+  static const String _keyAuthToken = 'auth_token';
+  static const String _keyAuthRole = 'auth_role';
+
+  static Future<String?> getAuthToken() => _storage.read(key: _keyAuthToken);
+  static Future<void> setAuthToken(String? value) async {
+    if (value == null || value.isEmpty) {
+      await _storage.delete(key: _keyAuthToken);
+      await _storage.delete(key: _keyAuthRole);
+    } else {
+      await _storage.write(key: _keyAuthToken, value: value);
+    }
+  }
+
+  static Future<String?> getAuthRole() => _storage.read(key: _keyAuthRole);
+  static Future<void> setAuthRole(String? value) async {
+    if (value == null || value.isEmpty) {
+      await _storage.delete(key: _keyAuthRole);
+    } else {
+      await _storage.write(key: _keyAuthRole, value: value);
+    }
+  }
 
   static Future<String?> getAdminPhone() => _storage.read(key: _keyAdminPhone);
   static Future<void> setAdminPhone(String? value) async {

@@ -186,6 +186,7 @@ class ApiClient {
   Future<http.Response> get(
     String path, {
     Map<String, String>? queryParameters,
+    Map<String, String>? headers,
     bool useCache = true,
   }) async {
     final uri = queryParameters != null && queryParameters.isNotEmpty
@@ -193,7 +194,7 @@ class ApiClient {
         : Uri.parse(baseUrl + path);
     final key = uri.toString();
 
-    if (useCache) {
+    if (useCache && headers == null) {
       final cached = _getCache[key];
       if (cached != null && !cached.isExpired) {
         return http.Response(cached.body, cached.statusCode);
@@ -202,10 +203,10 @@ class ApiClient {
 
     try {
       final response = await _clientOrCreate
-          .get(uri)
+          .get(uri, headers: headers)
           .timeout(receiveTimeout);
 
-      if (useCache && response.statusCode >= 200 && response.statusCode < 300) {
+      if (useCache && headers == null && response.statusCode >= 200 && response.statusCode < 300) {
         _getCache[key] = _CacheEntry(
           body: response.body,
           statusCode: response.statusCode,
@@ -215,8 +216,8 @@ class ApiClient {
       return response;
     } catch (e) {
       if (_isHttps && _isLookupError(e)) {
-        final fallback = await _requestViaIp(method: 'GET', path: path, queryParameters: queryParameters);
-        if (useCache && fallback.statusCode >= 200 && fallback.statusCode < 300) {
+        final fallback = await _requestViaIp(method: 'GET', path: path, queryParameters: queryParameters, headers: headers);
+        if (useCache && headers == null && fallback.statusCode >= 200 && fallback.statusCode < 300) {
           _getCache[key] = _CacheEntry(
             body: fallback.body,
             statusCode: fallback.statusCode,
