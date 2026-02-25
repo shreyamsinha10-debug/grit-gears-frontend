@@ -16,6 +16,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 
 import '../core/api_client.dart';
+import '../core/date_utils.dart';
 import '../theme/app_theme.dart';
 
 class RegistrationScreen extends StatefulWidget {
@@ -30,9 +31,11 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _emailController = TextEditingController();
+  final _addressController = TextEditingController();
 
   String _membershipType = 'Regular';
   String _batch = 'Morning';
+  DateTime? _dateOfBirth;
   bool _isSubmitting = false;
 
   /// Member photo (JPEG/PNG) as base64; null if not set.
@@ -49,6 +52,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     _nameController.dispose();
     _phoneController.dispose();
     _emailController.dispose();
+    _addressController.dispose();
     super.dispose();
   }
 
@@ -115,6 +119,9 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         'batch': _batch,
         'status': 'Active',
       };
+      final address = _addressController.text.trim();
+      if (address.isNotEmpty) body['address'] = address;
+      if (_dateOfBirth != null) body['date_of_birth'] = formatApiDate(_dateOfBirth!);
       if (_photoBase64 != null) body['photo_base64'] = _photoBase64;
       if (_idDocumentBase64 != null) {
         body['id_document_base64'] = _idDocumentBase64;
@@ -137,6 +144,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         setState(() {
           _membershipType = 'Regular';
           _batch = 'Morning';
+          _dateOfBirth = null;
+          _addressController.clear();
           _photoBase64 = null;
           _idDocumentBase64 = null;
           _idDocumentType = 'Aadhar';
@@ -251,6 +260,36 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                       if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(v.trim())) return 'Enter a valid email';
                       return null;
                     },
+                  ),
+                  const SizedBox(height: 20),
+                  TextFormField(
+                    controller: _addressController,
+                    decoration: _inputDecoration('Address (optional)', 'Street, city, PIN'),
+                    style: GoogleFonts.poppins(color: AppTheme.onSurface, fontSize: 16),
+                    maxLines: 2,
+                  ),
+                  const SizedBox(height: 20),
+                  InkWell(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _dateOfBirth ?? DateTime(2000),
+                        firstDate: DateTime(1900),
+                        lastDate: DateTime.now(),
+                      );
+                      if (picked != null && mounted) setState(() => _dateOfBirth = picked);
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: InputDecorator(
+                      decoration: _inputDecoration('Date of birth (optional)', null),
+                      child: Text(
+                        _dateOfBirth != null ? formatDisplayDate(_dateOfBirth) : 'Select date of birth',
+                        style: GoogleFonts.poppins(
+                          color: _dateOfBirth != null ? AppTheme.onSurface : Colors.grey,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 20),
                   DropdownButtonFormField<String>(

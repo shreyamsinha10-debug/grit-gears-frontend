@@ -19,6 +19,7 @@ import '../core/secure_storage.dart';
 import '../theme/app_theme.dart';
 import 'login_screen.dart';
 import 'attendance_report_screen.dart';
+import 'heatmap_screen.dart';
 import 'billing_screen.dart';
 import 'dashboard_screen.dart';
 import 'gym_settings_screen.dart';
@@ -147,9 +148,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ),
         actions: [
           IconButton(
+            icon: const Icon(FontAwesomeIcons.chartSimple),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HeatmapScreen())),
+            tooltip: 'Occupancy heatmap',
+          ),
+          IconButton(
             icon: const Icon(FontAwesomeIcons.calendarDays),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AttendanceReportScreen())),
-          ),
+          ],
           IconButton(
             icon: const Icon(FontAwesomeIcons.fileExport),
             onPressed: _showExportMenu,
@@ -474,6 +480,17 @@ class _OverviewTabState extends State<_OverviewTab> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            InkWell(
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HeatmapScreen())),
+              borderRadius: BorderRadius.circular(16),
+              child: _AnalyticsCard(
+                title: 'Occupancy heatmap',
+                value: 'Busy & quiet times',
+                icon: FontAwesomeIcons.chartSimple,
+                color: Colors.deepPurple,
+              ),
             ),
             const SizedBox(height: 16),
             if (d['date_from'] != null && d['date_to'] != null) ...[

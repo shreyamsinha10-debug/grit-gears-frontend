@@ -28,9 +28,11 @@ Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
   final nameController = TextEditingController(text: m.name);
   final phoneController = TextEditingController(text: m.phone);
   final emailController = TextEditingController(text: m.email);
+  final addressController = TextEditingController(text: m.address ?? '');
   String batch = m.batch;
   String status = m.status;
   String membershipType = m.membershipType;
+  DateTime? dateOfBirth = m.dateOfBirth != null && m.dateOfBirth!.isNotEmpty ? DateTime.tryParse(m.dateOfBirth!) : null;
   final scheduleController = TextEditingController(text: m.workoutSchedule ?? '');
   final dietController = TextEditingController(text: m.dietChart ?? '');
 
@@ -49,6 +51,24 @@ Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
               TextField(controller: phoneController, decoration: const InputDecoration(labelText: 'Phone'), keyboardType: TextInputType.phone, maxLength: 10, inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
               const SizedBox(height: 12),
               TextField(controller: emailController, decoration: const InputDecoration(labelText: 'Email'), keyboardType: TextInputType.emailAddress),
+              const SizedBox(height: 12),
+              TextField(controller: addressController, decoration: const InputDecoration(labelText: 'Address (optional)'), maxLines: 2),
+              const SizedBox(height: 12),
+              InkWell(
+                onTap: () async {
+                  final picked = await showDatePicker(
+                    context: ctx,
+                    initialDate: dateOfBirth ?? DateTime(2000),
+                    firstDate: DateTime(1900),
+                    lastDate: DateTime.now(),
+                  );
+                  if (picked != null) setDialogState(() => dateOfBirth = picked);
+                },
+                child: InputDecorator(
+                  decoration: InputDecoration(labelText: 'Date of birth (optional)'),
+                  child: Text(dateOfBirth != null ? formatDisplayDate(dateOfBirth) : 'Select date of birth', style: TextStyle(color: dateOfBirth != null ? null : Colors.grey)),
+                ),
+              ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 value: membershipType,
@@ -100,6 +120,8 @@ Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
                 'batch': batch,
                 'status': status,
                 'membership_type': membershipType,
+                'address': addressController.text.trim(),
+                'date_of_birth': dateOfBirth != null ? formatApiDate(dateOfBirth) : null,
               };
               if (membershipType.toLowerCase() == 'pt') {
                 body['workout_schedule'] = scheduleController.text;
@@ -866,9 +888,9 @@ class _OverviewTab extends StatelessWidget {
                   const SizedBox(height: 16),
                   _contactRow(Icons.email_outlined, 'Email', member.email),
                   _contactRow(Icons.phone_android_outlined, 'Phone', member.phone),
-                  _contactRow(Icons.location_on_outlined, 'Address', '—'),
+                  _contactRow(Icons.location_on_outlined, 'Address', member.address ?? '—'),
                   _contactRow(Icons.person_outline, 'Gender', '—'),
-                  _contactRow(Icons.cake_outlined, 'Date of Birth', '—'),
+                  _contactRow(Icons.cake_outlined, 'Date of Birth', member.dateOfBirth != null && member.dateOfBirth!.isNotEmpty ? (formatDisplayDate(parseApiDate(member.dateOfBirth)) ?? member.dateOfBirth!) : '—'),
                 ],
               ),
             ),

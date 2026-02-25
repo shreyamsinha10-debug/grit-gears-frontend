@@ -192,6 +192,8 @@ class MemberCreate(BaseModel):
     membership_type: MembershipType
     batch: Batch
     status: str = Field(default="Active", max_length=50)
+    address: str | None = None
+    date_of_birth: date | None = None  # YYYY-MM-DD
     photo_base64: str | None = None  # optional member photo (JPEG/PNG base64)
     id_document_base64: str | None = None  # optional ID document (PDF/image base64)
     id_document_type: str | None = None  # e.g. Aadhar, Driving Licence, Voter ID, Passport
@@ -214,6 +216,8 @@ class MemberResponse(BaseModel):
     status: str
     created_at: datetime
     last_attendance_date: date | None = None
+    address: str | None = None
+    date_of_birth: date | None = None
     workout_schedule: str | None = None
     diet_chart: str | None = None
     photo_base64: str | None = None
@@ -235,6 +239,8 @@ class MemberUpdate(BaseModel):
     membership_type: MembershipType | None = None
     batch: Batch | None = None
     status: str | None = None
+    address: str | None = None
+    date_of_birth: date | None = None
     workout_schedule: str | None = None
     diet_chart: str | None = None
 
@@ -764,6 +770,8 @@ async def create_member(member: MemberCreate, gym_id: str = Depends(get_gym_id))
         status=doc["status"],
         created_at=doc["created_at"],
         last_attendance_date=doc.get("last_attendance_date"),
+        address=doc.get("address"),
+        date_of_birth=_to_date(doc.get("date_of_birth")),
         workout_schedule=doc.get("workout_schedule"),
         diet_chart=doc.get("diet_chart"),
         photo_base64=doc.get("photo_base64"),
@@ -911,6 +919,10 @@ async def update_member(member_id: str, body: MemberUpdate, gym_id: str = Depend
         update["workout_schedule"] = body.workout_schedule
     if body.diet_chart is not None:
         update["diet_chart"] = body.diet_chart
+    if body.address is not None:
+        update["address"] = body.address.strip() if body.address else None
+    if body.date_of_birth is not None:
+        update["date_of_birth"] = body.date_of_birth
     if not update:
         result = await members_collection.find_one(member_q)
         if not result:
@@ -1032,6 +1044,8 @@ def _doc_to_member_response(doc, include_photos: bool = True, attendance_map: di
                 status=doc.get("status", "Active"),
                 created_at=doc["created_at"],
         last_attendance_date=_to_date(doc.get("last_attendance_date")),
+        address=doc.get("address"),
+        date_of_birth=_to_date(doc.get("date_of_birth")),
         workout_schedule=doc.get("workout_schedule"),
         diet_chart=doc.get("diet_chart"),
         photo_base64=doc.get("photo_base64") if include_photos else None,
@@ -1236,6 +1250,118 @@ async def attendance_by_date_range(date_from: str, date_to: str, gym_id: str = D
     q.update(_gym_filter(gym_id))
     cursor = attendance_collection.find(q).sort([("date_ist", 1), ("batch", 1), ("check_in_at_utc", 1)])
     return await _attendance_docs_to_records(cursor)
+
+
+@app.get("/attendance/heatmap")
+async def attendance_heatmap(
+    date_from: str | None = Query(None, description="Start date YYYY-MM-DD (default: 14 days ago)"),
+    date_to: str | None = Query(None, description="End date YYYY-MM-DD (default: today)"),
+    gym_id: str = Depends(get_gym_id),
+):
+    """
+    Occupancy heatmap for gym admin: per (date, hour) how many people were in the gym.
+    Returns today summary, heatmap grid (date_ist, hour, count), avg session duration, quietest slots.
+    """
+    from collections import defaultdict
+
+    today_str = today_ist().strftime("%Y-%m-%d")
+    if date_from is None or date_to is None:
+        start = today_ist() - timedelta(days=14)
+        end = today_ist()
+        date_from = start.strftime("%Y-%m-%d")
+        date_to = end.strftime("%Y-%m-%d")
+    else:
+        if len(date_from) != 10 or date_from[4] != "-" or len(date_to) != 10 or date_to[4] != "-":
+            raise HTTPException(status_code=400, detail="date_from and date_to must be YYYY-MM-DD")
+        if date_from > date_to:
+            raise HTTPException(status_code=400, detail="date_from must be <= date_to")
+
+    q = {"date_ist": {"$gte": date_from, "$lte": date_to}}
+    q.update(_gym_filter(gym_id))
+    cursor = attendance_collection.find(q)
+
+    grid = defaultdict(int)
+    durations_minutes = []
+
+    async for doc in cursor:
+        date_ist = doc.get("date_ist") or ""
+        if not date_ist:
+            continue
+        try:
+            ci_str = doc.get("check_in_at_ist")
+            if not ci_str:
+                continue
+            if hasattr(ci_str, "isoformat"):
+                check_in = ci_str.astimezone(IST) if getattr(ci_str, "tzinfo", None) else datetime.fromisoformat(str(ci_str).replace("Z", "+00:00")).astimezone(IST)
+            else:
+                s = str(ci_str).strip()
+                if s and "+" not in s and "Z" not in s:
+                    s = s + "+05:30"
+                check_in = datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(IST)
+        except Exception:
+            continue
+        co_str = doc.get("check_out_at_ist") or doc.get("check_out_at_utc")
+        if co_str:
+            try:
+                if hasattr(co_str, "isoformat"):
+                    check_out = co_str.astimezone(IST) if getattr(co_str, "tzinfo", None) else datetime.fromisoformat(str(co_str).replace("Z", "+00:00")).astimezone(IST)
+                else:
+                    s = str(co_str).strip()
+                    if s and "+" not in s and "Z" not in s:
+                        s = s + "+05:30"
+                    check_out = datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(IST)
+            except Exception:
+                check_out = check_in.replace(hour=23, minute=59)
+        else:
+            check_out = check_in.replace(hour=23, minute=59)
+        if check_out.date() != check_in.date():
+            check_out = check_in.replace(hour=23, minute=59)
+        h_start = check_in.hour
+        h_end = check_out.hour
+        for h in range(h_start, min(h_end + 1, 24)):
+            grid[(date_ist, h)] += 1
+        if co_str:
+            durations_minutes.append((check_out - check_in).total_seconds() / 60)
+
+    today_count = await attendance_collection.count_documents({**_gym_filter(gym_id), "date_ist": today_str})
+    today_check_outs = await attendance_collection.count_documents({
+        **_gym_filter(gym_id),
+        "date_ist": today_str,
+        "check_out_at_ist": {"$exists": True, "$ne": None, "$ne": ""},
+    })
+    currently_in_gym = today_count - today_check_outs
+
+    heatmap_list = [{"date_ist": d, "hour": h, "count": c} for (d, h), c in sorted(grid.items())]
+    avg_duration = round(sum(durations_minutes) / len(durations_minutes), 1) if durations_minutes else None
+
+    day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    dow_hour_agg = defaultdict(list)
+    for (d, h), c in grid.items():
+        try:
+            dt = datetime.strptime(d, "%Y-%m-%d")
+            dow = day_names[dt.weekday()]
+            dow_hour_agg[(dow, h)].append(c)
+        except Exception:
+            pass
+    quietest = []
+    for (dow, h), counts in dow_hour_agg.items():
+        avg = sum(counts) / len(counts) if counts else 0
+        quietest.append({"day_of_week": dow, "hour": h, "avg_count": round(avg, 1), "sample_days": len(counts)})
+    quietest.sort(key=lambda x: (x["avg_count"], -x["sample_days"]))
+    quietest_slots = quietest[:15]
+
+    return {
+        "today_summary": {
+            "check_ins": today_count,
+            "currently_in_gym": currently_in_gym,
+            "avg_duration_minutes": avg_duration,
+        },
+        "date_from": date_from,
+        "date_to": date_to,
+        "heatmap": heatmap_list,
+        "avg_duration_minutes": avg_duration,
+        "quietest_slots": quietest_slots,
+    }
 
 
 @app.post("/attendance/check-out/{member_id}", response_model=AttendanceRecord)
