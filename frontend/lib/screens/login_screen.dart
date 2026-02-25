@@ -341,13 +341,29 @@ class _LoginScreenState extends State<LoginScreen> {
     final radius = LayoutConstants.cardRadius(context);
 
     return Scaffold(
-      backgroundColor: surface,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: EdgeInsets.symmetric(horizontal: padding + 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // Background image (login screen only)
+          Positioned.fill(
+            child: Image.asset(
+              loginBackgroundAsset,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(color: const Color(0xFFE3F2FD)),
+            ),
+          ),
+          // Light overlay so form text stays readable
+          Positioned.fill(
+            child: Container(
+              color: Colors.white.withOpacity(0.75),
+            ),
+          ),
+          SafeArea(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.symmetric(horizontal: padding + 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
               const SizedBox(height: 8),
               Align(
                 alignment: Alignment.centerLeft,
@@ -558,6 +574,8 @@ class _LoginScreenState extends State<LoginScreen> {
             ],
           ),
         ),
+      ),
+        ],
       ),
     );
   }

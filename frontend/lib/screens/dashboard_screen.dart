@@ -27,6 +27,7 @@ class Member {
   final String status;
   final String? address;
   final String? dateOfBirth;  // YYYY-MM-DD from API
+  final String? gender;
   final String? workoutSchedule;
   final String? dietChart;
   final String? photoBase64;
@@ -47,6 +48,7 @@ class Member {
     required this.status,
     this.address,
     this.dateOfBirth,
+    this.gender,
     this.workoutSchedule,
     this.dietChart,
     this.photoBase64,
@@ -90,6 +92,7 @@ class Member {
       status: json['status'] as String? ?? 'Active',
       address: json['address'] as String?,
       dateOfBirth: json['date_of_birth'] as String?,
+      gender: json['gender'] as String?,
       workoutSchedule: json['workout_schedule'] as String?,
       dietChart: json['diet_chart'] as String?,
       photoBase64: json['photo_base64'] as String?,

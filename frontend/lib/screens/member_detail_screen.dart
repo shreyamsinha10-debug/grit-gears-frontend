@@ -32,6 +32,7 @@ Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
   String batch = m.batch;
   String status = m.status;
   String membershipType = m.membershipType;
+  String? gender = m.gender;
   DateTime? dateOfBirth = m.dateOfBirth != null && m.dateOfBirth!.isNotEmpty ? DateTime.tryParse(m.dateOfBirth!) : null;
   final scheduleController = TextEditingController(text: m.workoutSchedule ?? '');
   final dietController = TextEditingController(text: m.dietChart ?? '');
@@ -68,6 +69,19 @@ Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
                   decoration: InputDecoration(labelText: 'Date of birth (optional)'),
                   child: Text(dateOfBirth != null ? formatDisplayDate(dateOfBirth) : 'Select date of birth', style: TextStyle(color: dateOfBirth != null ? null : Colors.grey)),
                 ),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: gender,
+                decoration: const InputDecoration(labelText: 'Gender (optional)'),
+                items: const [
+                  DropdownMenuItem(value: null, child: Text('Select gender')),
+                  DropdownMenuItem(value: 'Male', child: Text('Male')),
+                  DropdownMenuItem(value: 'Female', child: Text('Female')),
+                  DropdownMenuItem(value: 'Other', child: Text('Other')),
+                  DropdownMenuItem(value: 'Prefer not to say', child: Text('Prefer not to say')),
+                ],
+                onChanged: (v) => setDialogState(() => gender = v),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
@@ -121,7 +135,8 @@ Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
                 'status': status,
                 'membership_type': membershipType,
                 'address': addressController.text.trim(),
-                'date_of_birth': dateOfBirth != null ? formatApiDate(dateOfBirth) : null,
+                'date_of_birth': dateOfBirth != null ? formatApiDate(dateOfBirth!) : null,
+                'gender': gender,
               };
               if (membershipType.toLowerCase() == 'pt') {
                 body['workout_schedule'] = scheduleController.text;
@@ -889,7 +904,7 @@ class _OverviewTab extends StatelessWidget {
                   _contactRow(Icons.email_outlined, 'Email', member.email),
                   _contactRow(Icons.phone_android_outlined, 'Phone', member.phone),
                   _contactRow(Icons.location_on_outlined, 'Address', member.address ?? '—'),
-                  _contactRow(Icons.person_outline, 'Gender', '—'),
+                  _contactRow(Icons.person_outline, 'Gender', member.gender ?? '—'),
                   _contactRow(Icons.cake_outlined, 'Date of Birth', member.dateOfBirth != null && member.dateOfBirth!.isNotEmpty ? (formatDisplayDate(parseApiDate(member.dateOfBirth)) ?? member.dateOfBirth!) : '—'),
                 ],
               ),

@@ -194,6 +194,7 @@ class MemberCreate(BaseModel):
     status: str = Field(default="Active", max_length=50)
     address: str | None = None
     date_of_birth: date | None = None  # YYYY-MM-DD
+    gender: str | None = None  # e.g. Male, Female, Other, Prefer not to say
     photo_base64: str | None = None  # optional member photo (JPEG/PNG base64)
     id_document_base64: str | None = None  # optional ID document (PDF/image base64)
     id_document_type: str | None = None  # e.g. Aadhar, Driving Licence, Voter ID, Passport
@@ -218,6 +219,7 @@ class MemberResponse(BaseModel):
     last_attendance_date: date | None = None
     address: str | None = None
     date_of_birth: date | None = None
+    gender: str | None = None
     workout_schedule: str | None = None
     diet_chart: str | None = None
     photo_base64: str | None = None
@@ -241,6 +243,7 @@ class MemberUpdate(BaseModel):
     status: str | None = None
     address: str | None = None
     date_of_birth: date | None = None
+    gender: str | None = None
     workout_schedule: str | None = None
     diet_chart: str | None = None
 
@@ -737,6 +740,8 @@ async def create_member(member: MemberCreate, gym_id: str = Depends(get_gym_id))
     from datetime import timezone
     doc = member.model_dump()
     doc["gym_id"] = gym_id
+    if doc.get("date_of_birth") is not None:
+        doc["date_of_birth"] = datetime.combine(doc["date_of_birth"], datetime.min.time())
     # Normalize phone: digits only, max 10 chars (member login uses by-phone)
     doc["phone"] = normalize_phone(doc.get("phone") or "")
     if not doc["phone"]:
@@ -772,6 +777,7 @@ async def create_member(member: MemberCreate, gym_id: str = Depends(get_gym_id))
         last_attendance_date=doc.get("last_attendance_date"),
         address=doc.get("address"),
         date_of_birth=_to_date(doc.get("date_of_birth")),
+        gender=doc.get("gender"),
         workout_schedule=doc.get("workout_schedule"),
         diet_chart=doc.get("diet_chart"),
         photo_base64=doc.get("photo_base64"),
@@ -922,7 +928,10 @@ async def update_member(member_id: str, body: MemberUpdate, gym_id: str = Depend
     if body.address is not None:
         update["address"] = body.address.strip() if body.address else None
     if body.date_of_birth is not None:
-        update["date_of_birth"] = body.date_of_birth
+        from datetime import time
+        update["date_of_birth"] = datetime.combine(body.date_of_birth, time.min)
+    if body.gender is not None:
+        update["gender"] = body.gender.strip() if body.gender else None
     if not update:
         result = await members_collection.find_one(member_q)
         if not result:
@@ -1046,6 +1055,7 @@ def _doc_to_member_response(doc, include_photos: bool = True, attendance_map: di
         last_attendance_date=_to_date(doc.get("last_attendance_date")),
         address=doc.get("address"),
         date_of_birth=_to_date(doc.get("date_of_birth")),
+        gender=doc.get("gender"),
         workout_schedule=doc.get("workout_schedule"),
         diet_chart=doc.get("diet_chart"),
         photo_base64=doc.get("photo_base64") if include_photos else None,
@@ -1056,10 +1066,17 @@ def _doc_to_member_response(doc, include_photos: bool = True, attendance_map: di
 
 
 def _to_date(v):
-    """Convert datetime to date for API; leave date as is."""
+    """Convert datetime to date for API; handle datetime, date, or YYYY-MM-DD string."""
     if v is None:
         return None
-    return v.date() if hasattr(v, "date") else v
+    if hasattr(v, "date") and callable(getattr(v, "date")):
+        return v.date()
+    if isinstance(v, str) and len(v) >= 10:
+        try:
+            return datetime.strptime(v[:10], "%Y-%m-%d").date()
+        except ValueError:
+            pass
+    return v
 
 
 # ---------- Attendance ----------
@@ -1349,6 +1366,9 @@ async def attendance_heatmap(
         quietest.append({"day_of_week": dow, "hour": h, "avg_count": round(avg, 1), "sample_days": len(counts)})
     quietest.sort(key=lambda x: (x["avg_count"], -x["sample_days"]))
     quietest_slots = quietest[:15]
+    quietest_keys = {(s["day_of_week"], s["hour"]) for s in quietest_slots}
+    busiest = sorted(quietest, key=lambda x: (-x["avg_count"], -x["sample_days"]))
+    busiest_slots = [s for s in busiest[:15] if (s["day_of_week"], s["hour"]) not in quietest_keys]
 
     return {
         "today_summary": {
@@ -1361,6 +1381,7 @@ async def attendance_heatmap(
         "heatmap": heatmap_list,
         "avg_duration_minutes": avg_duration,
         "quietest_slots": quietest_slots,
+        "busiest_slots": busiest_slots,
     }
 
 

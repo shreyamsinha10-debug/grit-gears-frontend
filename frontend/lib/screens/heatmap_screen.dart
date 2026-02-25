@@ -113,9 +113,11 @@ class _HeatmapScreenState extends State<HeatmapScreen> {
                         const SizedBox(height: 20),
                         _buildHeatmapSection(),
                         const SizedBox(height: 24),
-                        _buildQuietestSection(),
-                        const SizedBox(height: 24),
                         _buildLegend(),
+                        const SizedBox(height: 24),
+                        _buildBusiestSection(),
+                        const SizedBox(height: 24),
+                        _buildQuietestSection(),
                       ],
                     ),
                   ),
@@ -196,43 +198,62 @@ class _HeatmapScreenState extends State<HeatmapScreen> {
         ),
       );
     }
-    final Set<String> dates = {};
-    final Set<int> hours = {};
-    for (final e in heatmap) {
-      final m = e as Map<String, dynamic>;
-      dates.add(m['date_ist'] as String? ?? '');
-      hours.add(m['hour'] as int? ?? 0);
-    }
-    final dateList = dates.where((d) => d.isNotEmpty).toList()..sort();
-    final hourList = hours.toList()..sort();
-    int minHour = 6;
-    int maxHour = 22;
-    if (hourList.isNotEmpty) {
-      minHour = hourList.first.clamp(0, 23);
-      maxHour = hourList.last.clamp(0, 23);
-    }
+    // Fixed gym hours: 5 AM to 11 PM (hours 5–23)
+    const int minHour = 5;
+    const int maxHour = 23;
     final hourRange = List.generate(maxHour - minHour + 1, (i) => minHour + i);
+
     final grid = <String, Map<int, int>>{};
+    final Set<String> dates = {};
     for (final e in heatmap) {
       final m = e as Map<String, dynamic>;
       final d = m['date_ist'] as String? ?? '';
       final h = m['hour'] as int? ?? 0;
-      final c = m['count'] as int? ?? 0;
+      if (h < minHour || h > maxHour) continue;
+      dates.add(d);
       grid.putIfAbsent(d, () => {});
-      grid[d]![h] = c;
+      grid[d]![h] = m['count'] as int? ?? 0;
     }
+    final dateList = dates.where((d) => d.isNotEmpty).toList()..sort();
+
     int maxCount = 1;
     for (final row in grid.values) {
       for (final c in row.values) {
         if (c > maxCount) maxCount = c;
       }
     }
+
+    // Occupancy levels: Empty (0), Light (1–33%), Medium (33–66%), Heavy (66%+)
+    Color colorForCount(int c) {
+      if (c == 0) return const Color(0xFFE8F5E9); // light green – empty
+      if (maxCount <= 0) return const Color(0xFFE8F5E9);
+      final t = c / maxCount;
+      if (t <= 0.33) return const Color(0xFFFFF9C4); // light yellow – light
+      if (t <= 0.66) return const Color(0xFFFFB74D); // orange – medium
+      return const Color(0xFFE57373); // red – heavy
+    }
+
+    String levelLabel(int c) {
+      if (c == 0) return 'Empty';
+      if (maxCount <= 0) return 'Empty';
+      final t = c / maxCount;
+      if (t <= 0.33) return 'Light';
+      if (t <= 0.66) return 'Medium';
+      return 'Heavy';
+    }
+
+    String hourAmPm(int h) {
+      if (h < 12) return '${h == 0 ? 12 : h}AM';
+      if (h == 12) return '12PM';
+      return '${h - 12}PM';
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('Occupancy by day & hour', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
-        const SizedBox(height: 8),
-        Text('Darker = busier. Use this to tell customers when to visit.', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
+        Text('Occupancy by day & time (5 AM – 11 PM)', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
+        const SizedBox(height: 6),
+        Text('Green = empty • Yellow = light • Orange = medium • Red = heavy', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
         const SizedBox(height: 12),
         Card(
           color: AppTheme.surfaceVariant,
@@ -246,40 +267,48 @@ class _HeatmapScreenState extends State<HeatmapScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Hour header: 5AM ... 11PM
                     Row(
                       children: [
-                        const SizedBox(width: 56),
+                        SizedBox(width: 52, child: Text('Date', style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.grey.shade700))),
                         ...hourRange.map((h) => SizedBox(
-                              width: 28,
+                              width: 32,
                               child: Center(
-                                child: Text(h <= 12 ? '${h == 0 ? 12 : h}' : '${h - 12}', style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey.shade600)),
+                                child: Text(hourAmPm(h), style: GoogleFonts.poppins(fontSize: 9, color: Colors.grey.shade600)),
                               ),
                             )),
                       ],
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     ...dateList.reversed.take(21).map((dateIst) {
                       final dayLabel = dateIst.length >= 10 ? '${dateIst.substring(8)}/${dateIst.substring(5, 7)}' : dateIst;
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 4),
                         child: Row(
                           children: [
-                            SizedBox(width: 56, child: Text(dayLabel, style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey.shade700))),
+                            SizedBox(width: 52, child: Text(dayLabel, style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey.shade700))),
                             ...hourRange.map((h) {
                               final c = (grid[dateIst]?[h] ?? 0);
-                              final t = maxCount > 0 ? (c / maxCount).clamp(0.0, 1.0) : 0.0;
-                              final color = Color.lerp(AppTheme.surfaceVariant, AppTheme.primary, t) ?? AppTheme.surfaceVariant;
-                              final fg = t > 0.5 ? AppTheme.onPrimary : AppTheme.onSurface;
-                              return Container(
-                                width: 26,
-                                height: 26,
-                                margin: const EdgeInsets.only(right: 2),
-                                decoration: BoxDecoration(
-                                  color: color,
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(color: Colors.grey.shade300, width: 0.5),
+                              final color = colorForCount(c);
+                              final label = levelLabel(c);
+                              final fg = c > 0 && (color.value == 0xFFE57373 || color.value == 0xFFFFB74D) ? Colors.white : AppTheme.onSurface;
+                              return Tooltip(
+                                message: '${hourAmPm(h)}: $label${c > 0 ? ' ($c people)' : ''}',
+                                child: Container(
+                                  width: 30,
+                                  height: 28,
+                                  margin: const EdgeInsets.only(right: 2),
+                                  decoration: BoxDecoration(
+                                    color: color,
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: Colors.grey.shade300, width: 0.5),
+                                  ),
+                                  child: Center(
+                                    child: c > 0
+                                        ? Text('$c', style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: fg))
+                                        : null,
+                                  ),
                                 ),
-                                child: Center(child: c > 0 ? Text('$c', style: GoogleFonts.poppins(fontSize: 9, fontWeight: FontWeight.w600, color: fg)) : null),
                               );
                             }),
                           ],
@@ -289,6 +318,57 @@ class _HeatmapScreenState extends State<HeatmapScreen> {
                   ],
                 ),
               ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+      ],
+    );
+  }
+
+  Widget _buildBusiestSection() {
+    final slots = _data?['busiest_slots'] as List<dynamic>? ?? [];
+    if (slots.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.whatshot, size: 20, color: Colors.deepOrange.shade700),
+            const SizedBox(width: 8),
+            Text('Peak hours (heavily occupied)', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text('These times are typically busiest – suggest other slots if customers want less crowd.', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
+        const SizedBox(height: 12),
+        Card(
+          color: AppTheme.surfaceVariant,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: slots.take(10).map<Widget>((s) {
+                final m = s as Map<String, dynamic>;
+                final dow = m['day_of_week'] as String? ?? '';
+                final h = m['hour'] as int? ?? 0;
+                final avg = m['avg_count'];
+                final hourStr = h <= 11 ? '${h == 0 ? 12 : h}:00 AM' : (h == 12 ? '12:00 PM' : '${h - 12}:00 PM');
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(color: Colors.deepOrange.shade100, borderRadius: BorderRadius.circular(8)),
+                        child: Text('$dow $hourStr', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.deepOrange.shade900)),
+                      ),
+                      const SizedBox(width: 12),
+                      Text('~${avg ?? 0} people on avg', style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade700)),
+                    ],
+                  ),
+                );
+              }).toList(),
             ),
           ),
         ),
@@ -347,24 +427,43 @@ class _HeatmapScreenState extends State<HeatmapScreen> {
   }
 
   Widget _buildLegend() {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Empty', style: GoogleFonts.poppins(fontSize: 11, color: Colors.grey.shade600)),
-        const SizedBox(width: 6),
-        Container(width: 24, height: 16, decoration: BoxDecoration(color: AppTheme.surfaceVariant, borderRadius: BorderRadius.circular(4))),
-        Expanded(
-          child: Container(
-            height: 16,
-            margin: const EdgeInsets.symmetric(horizontal: 4),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(4),
-              gradient: LinearGradient(colors: [AppTheme.surfaceVariant, AppTheme.primary], begin: Alignment.centerLeft, end: Alignment.centerRight),
-            ),
-          ),
+        Text('Occupancy levels', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 16,
+          runSpacing: 8,
+          children: [
+            _legendItem(const Color(0xFFE8F5E9), 'Empty', 'No one'),
+            _legendItem(const Color(0xFFFFF9C4), 'Light', 'Few people'),
+            _legendItem(const Color(0xFFFFB74D), 'Medium', 'Moderate'),
+            _legendItem(const Color(0xFFE57373), 'Heavy', 'Peak time'),
+          ],
         ),
-        Container(width: 24, height: 16, decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(4))),
+      ],
+    );
+  }
+
+  Widget _legendItem(Color color, String label, String sub) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 20,
+          height: 20,
+          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.grey.shade400)),
+        ),
         const SizedBox(width: 6),
-        Text('Busy', style: GoogleFonts.poppins(fontSize: 11, color: Colors.grey.shade600)),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
+            Text(sub, style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey.shade600)),
+          ],
+        ),
       ],
     );
   }

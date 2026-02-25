@@ -35,6 +35,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
 
   String _membershipType = 'Regular';
   String _batch = 'Morning';
+  String? _gender;
   DateTime? _dateOfBirth;
   bool _isSubmitting = false;
 
@@ -122,6 +123,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
       final address = _addressController.text.trim();
       if (address.isNotEmpty) body['address'] = address;
       if (_dateOfBirth != null) body['date_of_birth'] = formatApiDate(_dateOfBirth!);
+      if (_gender != null && _gender!.isNotEmpty) body['gender'] = _gender;
       if (_photoBase64 != null) body['photo_base64'] = _photoBase64;
       if (_idDocumentBase64 != null) {
         body['id_document_base64'] = _idDocumentBase64;
@@ -146,6 +148,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
           _batch = 'Morning';
           _dateOfBirth = null;
           _addressController.clear();
+          _gender = null;
           _photoBase64 = null;
           _idDocumentBase64 = null;
           _idDocumentType = 'Aadhar';
@@ -290,6 +293,21 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                         ),
                       ),
                     ),
+                  ),
+                  const SizedBox(height: 20),
+                  DropdownButtonFormField<String>(
+                    value: _gender,
+                    decoration: _inputDecoration('Gender (optional)', null),
+                    dropdownColor: AppTheme.surfaceVariant,
+                    style: GoogleFonts.poppins(color: AppTheme.onSurface, fontSize: 16),
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('Select gender')),
+                      const DropdownMenuItem(value: 'Male', child: Text('Male')),
+                      const DropdownMenuItem(value: 'Female', child: Text('Female')),
+                      const DropdownMenuItem(value: 'Other', child: Text('Other')),
+                      const DropdownMenuItem(value: 'Prefer not to say', child: Text('Prefer not to say')),
+                    ],
+                    onChanged: (v) => setState(() => _gender = v),
                   ),
                   const SizedBox(height: 20),
                   DropdownButtonFormField<String>(

@@ -12,6 +12,8 @@ import 'package:google_fonts/google_fonts.dart';
 /// Default gym name and logo asset when not overridden by gym profile.
 const String defaultGymName = 'Grit & Gears';
 const String defaultLogoAsset = 'assets/logo.png';
+/// Login screen background (bicep/gear/phone graphic). Place your image at frontend/assets/login_background.png.
+const String loginBackgroundAsset = 'assets/login_background.png';
 
 /// Jupiter Arena – Light, clean SaaS theme.
 /// Backgrounds: Pure White, light grey cards.

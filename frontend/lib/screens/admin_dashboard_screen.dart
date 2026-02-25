@@ -155,7 +155,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           IconButton(
             icon: const Icon(FontAwesomeIcons.calendarDays),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AttendanceReportScreen())),
-          ],
+          ),
           IconButton(
             icon: const Icon(FontAwesomeIcons.fileExport),
             onPressed: _showExportMenu,
