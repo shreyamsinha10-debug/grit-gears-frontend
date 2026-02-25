@@ -469,7 +469,7 @@ class _OverviewTabState extends State<_OverviewTab> {
             FilledButton.icon(
               onPressed: _sendingReminders ? null : _sendReminders,
               icon: _sendingReminders ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(FontAwesomeIcons.whatsapp),
-              label: Text(_sendingReminders ? 'Sending...' : 'Send Month-End Reminders'),
+              label: Text(_sendingReminders ? 'Sending...' : 'Send Payment Reminders'),
               style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: AppTheme.onPrimary),
             ),
           ],

@@ -1108,7 +1108,7 @@ async def analytics_dashboard(date_from: str | None = None, date_to: str | None 
 
 @app.post("/admin/run-fee-reminders")
 async def run_fee_reminders(background_tasks: BackgroundTasks):
-    """Send Month-End Reminders: simulated WhatsApp to all members with unpaid fees."""
+    """Send Payment Reminders: simulated WhatsApp to all members with unpaid fees."""
     from utils import send_notification
     from bson import ObjectId
     cursor = payments_collection.find({"status": {"$in": ["Due", "Overdue"]}})
