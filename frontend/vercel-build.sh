@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -e
+# Avoid exit 128 from Flutter's internal git calls on Vercel (no git config)
+git config --global user.email "build@vercel.app" 2>/dev/null || true
+git config --global user.name "Vercel" 2>/dev/null || true
 if ! command -v flutter >/dev/null 2>&1; then
   echo "Installing Flutter..."
   FLUTTER_URL="https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.41.2-stable.tar.xz"
