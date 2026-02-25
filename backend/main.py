@@ -233,6 +233,11 @@ class MemberUpdate(BaseModel):
     diet_chart: str | None = None
 
 
+class MemberResetPasswordBody(BaseModel):
+    """Gym Admin: reset a member's password."""
+    new_password: str = Field(..., min_length=6)
+
+
 class PhotoUpdate(BaseModel):
     """Set or clear member profile photo. Send photo_base64: null to delete."""
     photo_base64: str | None = None
@@ -837,6 +842,31 @@ async def update_member(member_id: str, body: MemberUpdate, gym_id: str = Depend
     attendance_map = {member_id: att_doc} if att_doc else None
     
     return _doc_to_member_response(result, attendance_map=attendance_map)
+
+
+@app.patch("/members/{member_id}/password", response_model=dict)
+async def reset_member_password(member_id: str, body: MemberResetPasswordBody, gym_id: str = Depends(get_gym_id)):
+    """Gym Admin: reset a member's password."""
+    from bson import ObjectId
+    from datetime import timezone
+    try:
+        oid = ObjectId(member_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid ID")
+    q = {"_id": oid}
+    q.update(_gym_filter(gym_id))
+    doc = await members_collection.find_one(q)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Member not found")
+    try:
+        password_hash = pwd_context.hash(body.new_password)
+    except Exception:
+        password_hash = _pwd_fallback.hash(body.new_password)
+    await members_collection.update_one(
+        q,
+        {"$set": {"password_hash": password_hash, "updated_at": datetime.now(timezone.utc)}}
+    )
+    return {"message": "Password reset successfully"}
 
 
 @app.patch("/members/{member_id}/photo", response_model=MemberResponse)

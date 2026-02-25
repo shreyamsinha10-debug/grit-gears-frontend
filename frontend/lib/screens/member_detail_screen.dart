@@ -446,6 +446,72 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
     }
   }
 
+  Future<void> _showResetPasswordDialog() async {
+    final controller = TextEditingController();
+    bool loading = false;
+    String? error;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Reset Password'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Set a new password for ${_member.name}. They can use this to log in.',
+                style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey.shade700),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                obscureText: true,
+                decoration: InputDecoration(
+                  labelText: 'New Password',
+                  errorText: error,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            FilledButton(
+              onPressed: loading
+                  ? null
+                  : () async {
+                      if (controller.text.length < 6) {
+                        setDialogState(() => error = 'Password must be at least 6 characters');
+                        return;
+                      }
+                      setDialogState(() { loading = true; error = null; });
+                      try {
+                        final r = await ApiClient.instance.patch(
+                          '/members/${_member.id}/password',
+                          headers: {'Content-Type': 'application/json'},
+                          body: jsonEncode({'new_password': controller.text}),
+                        );
+                        if (r.statusCode >= 200 && r.statusCode < 300) {
+                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password reset successfully')));
+                        } else {
+                          final msg = jsonDecode(r.body)['detail'] ?? 'Failed';
+                          setDialogState(() { loading = false; error = msg.toString(); });
+                        }
+                      } catch (e) {
+                        setDialogState(() { loading = false; error = 'Error: $e'; });
+                      }
+                    },
+              child: loading
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                  : const Text('Reset'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final m = _member;
@@ -469,10 +535,17 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
             tooltip: 'Edit',
             onPressed: _showEditDialog,
           ),
-          IconButton(
-            icon: const Icon(Icons.delete_outline),
-            tooltip: 'Delete',
-            onPressed: _deleteMember,
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'More – Reset password, Delete member',
+            onSelected: (v) {
+              if (v == 'reset') _showResetPasswordDialog();
+              if (v == 'delete') _deleteMember();
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 'reset', child: Text('Reset / Assign Password')),
+              const PopupMenuItem(value: 'delete', child: Text('Delete Member', style: TextStyle(color: Colors.red))),
+            ],
           ),
         ],
       ),
