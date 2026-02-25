@@ -696,7 +696,18 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
         ),
         actions: [
           OutlinedButton.icon(
-            onPressed: () => PdfInvoiceHelper.generateAndPrint(inv),
+            onPressed: () async {
+              Map<String, dynamic>? gymProfile;
+              try {
+                final r = await ApiClient.instance.get('/gym/profile', useCache: true);
+                if (r.statusCode >= 200 && r.statusCode < 300) {
+                  gymProfile = jsonDecode(r.body) as Map<String, dynamic>?;
+                }
+              } catch (_) {}
+              if (ctx.mounted) {
+                await PdfInvoiceHelper.generateAndPrint(inv, gymProfile: gymProfile);
+              }
+            },
             icon: const Icon(Icons.print, size: 18),
             label: const Text('Print / PDF'),
           ),

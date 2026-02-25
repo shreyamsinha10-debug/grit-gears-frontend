@@ -1,28 +1,45 @@
+import 'dart:convert';
+
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../theme/app_theme.dart' show defaultGymName, defaultLogoAsset;
+
 class PdfInvoiceHelper {
-  static Future<void> generateAndPrint(Map<String, dynamic> invoice) async {
-    final pdf = await _generatePdf(invoice);
+  /// [gymProfile] optional: { name, logo_base64, invoice_name } from GET /gym/profile. If provided, logo and name are used on the invoice.
+  static Future<void> generateAndPrint(Map<String, dynamic> invoice, {Map<String, dynamic>? gymProfile}) async {
+    final pdf = await _generatePdf(invoice, gymProfile: gymProfile);
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => pdf.save(),
       name: 'Invoice-${invoice['id']}',
     );
   }
 
-  static Future<pw.Document> _generatePdf(Map<String, dynamic> invoice) async {
+  static Future<pw.Document> _generatePdf(Map<String, dynamic> invoice, {Map<String, dynamic>? gymProfile}) async {
     final pdf = pw.Document();
 
-    // Load logo if possible
+    // Logo: prefer gym profile logo (base64), else fallback to asset
     pw.MemoryImage? logoImage;
     try {
-      final logoBytes = await rootBundle.load('assets/logo.png');
-      logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
+      final logoBase64 = gymProfile?['logo_base64'] as String?;
+      if (logoBase64 != null && logoBase64.isNotEmpty) {
+        final bytes = base64Decode(logoBase64);
+        logoImage = pw.MemoryImage(bytes);
+      }
+      if (logoImage == null) {
+        final logoBytes = await rootBundle.load(defaultLogoAsset);
+        logoImage = pw.MemoryImage(logoBytes.buffer.asUint8List());
+      }
     } catch (_) {}
 
-    // Extract data
+    // Gym / invoice name: from profile or default
+    final gymDisplayName = gymProfile != null
+        ? ((gymProfile['invoice_name'] as String?)?.trim().isNotEmpty == true
+            ? (gymProfile['invoice_name'] as String).trim()
+            : (gymProfile['name'] as String?)?.trim() ?? defaultGymName)
+        : defaultGymName;
     final invoiceNo = invoice['id']?.toString().substring(0, 8).toUpperCase() ?? '';
     final date = invoice['issued_at'] != null
         ? DateTime.parse(invoice['issued_at'].toString()).toLocal().toString().split(' ')[0]
@@ -79,7 +96,7 @@ class PdfInvoiceHelper {
                       child: pw.Column(
                         children: [
                           pw.Text(
-                            'Jupiter Arena',
+                            gymDisplayName,
                             style: pw.TextStyle(
                               fontSize: 32,
                               fontWeight: pw.FontWeight.bold,

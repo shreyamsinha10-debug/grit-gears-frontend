@@ -3,10 +3,15 @@
 // ---------------------------------------------------------------------------
 // Defines colors, typography (Poppins), and Material 3 theme data used
 // across all screens. Use [AppTheme.light] / [AppTheme.dark] in MaterialApp.
+// Default branding when no gym admin is logged in or gym has no custom name/logo.
 // ---------------------------------------------------------------------------
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+
+/// Default gym name and logo asset when not overridden by gym profile.
+const String defaultGymName = 'Grit & Gears';
+const String defaultLogoAsset = 'assets/logo.png';
 
 /// Jupiter Arena – Light, clean SaaS theme.
 /// Backgrounds: Pure White, light grey cards.

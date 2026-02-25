@@ -52,7 +52,7 @@ class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Jupiter Arena',
+      title: defaultGymName,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
@@ -61,7 +61,7 @@ class _MyAppState extends State<MyApp> {
       // "GlobalKey used multiple times" (ink renderer) when theme changes.
       home: KeyedSubtree(
         key: ValueKey<ThemeMode>(_themeMode),
-        child: MyHomePage(title: 'Jupiter Arena', onThemeChanged: setThemeDark),
+        child: MyHomePage(title: defaultGymName, onThemeChanged: setThemeDark),
       ),
     );
   }
@@ -90,7 +90,7 @@ class _MyHomePageState extends State<MyHomePage> {
       _checkUpdate();
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      precacheImage(const AssetImage('assets/logo.png'), context);
+      precacheImage(const AssetImage(defaultLogoAsset), context);
     });
   }
 
@@ -227,7 +227,7 @@ class _MyHomePageState extends State<MyHomePage> {
       appBar: AppBar(
         leading: Padding(
           padding: const EdgeInsets.all(8),
-          child: _JupiterLogo(size: 40),
+          child: _AppLogo(size: 40),
         ),
         title: FittedBox(
           fit: BoxFit.scaleDown,
@@ -312,16 +312,16 @@ class _MyHomePageState extends State<MyHomePage> {
   }
 }
 
-/// Jupiter Arena logo: asset or placeholder.
-class _JupiterLogo extends StatelessWidget {
+/// Default app logo (Grit & Gears); asset or placeholder.
+class _AppLogo extends StatelessWidget {
   final double size;
 
-  const _JupiterLogo({this.size = 48});
+  const _AppLogo({this.size = 48});
 
   @override
   Widget build(BuildContext context) {
     return Image.asset(
-      'assets/logo.png',
+      defaultLogoAsset,
       height: size,
       width: size,
       fit: BoxFit.contain,

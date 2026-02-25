@@ -40,6 +40,7 @@ COLLECTION_PAYMENTS = "payments"
 COLLECTION_INVOICES = "invoices"
 COLLECTION_GYMS = "gyms"
 COLLECTION_GYM_ADMINS = "gym_admins"
+COLLECTION_APP_CONFIG = "app_config"
 
 # Fee constants (used for registration, monthly dues, walk-in first bill)
 REGISTRATION_FEE = 1000
@@ -56,13 +57,19 @@ payments_collection = db[COLLECTION_PAYMENTS]
 invoices_collection = db[COLLECTION_INVOICES]
 gyms_collection = db[COLLECTION_GYMS]
 gym_admins_collection = db[COLLECTION_GYM_ADMINS]
+app_config_collection = db[COLLECTION_APP_CONFIG]
 
 # Super admin auth
 SUPER_ADMIN_LOGIN_ID = os.environ.get("SUPER_ADMIN_LOGIN_ID", "Dertz@info987656")
 SUPER_ADMIN_PASSWORD = os.environ.get("SUPER_ADMIN_PASSWORD", "#include<376494")
+# Legacy default gym admin (phone 9999999999) – shown in Super Admin list if not in DB
+DEFAULT_GYM_ADMIN_LOGIN_ID = os.environ.get("DEFAULT_GYM_ADMIN_LOGIN_ID", "9999999999")
+DEFAULT_GYM_ADMIN_PASSWORD = os.environ.get("DEFAULT_GYM_ADMIN_PASSWORD", "999999")
 JWT_SECRET = os.environ.get("JWT_SECRET", "gym-saas-jwt-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["bcrypt", "pbkdf2_sha256"], deprecated="auto")
+# Fallback when bcrypt not installed (e.g. Windows without C++ build tools)
+_pwd_fallback = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 
 # ---------------------------------------------------------------------------
@@ -97,8 +104,43 @@ def batch_from_ist(dt: datetime) -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """On startup: mark members as Inactive if last_attendance_date is older than 90 days (IST)."""
+    """On startup: ensure default gym for legacy; backfill gym_id; mark inactive 90d."""
     from datetime import timezone
+    from bson import ObjectId
+
+    # Ensure default gym exists for legacy admin (9999999999)
+    default_gym = await gyms_collection.find_one({"name": "Default (Legacy)"})
+    if not default_gym:
+        default_gym_doc = {"name": "Default (Legacy)", "created_at": datetime.now(timezone.utc)}
+        r = await gyms_collection.insert_one(default_gym_doc)
+        default_gym_id = r.inserted_id
+    else:
+        default_gym_id = default_gym["_id"]
+    await app_config_collection.update_one(
+        {"_id": "default_gym_id"},
+        {"$set": {"value": str(default_gym_id)}},
+        upsert=True,
+    )
+
+    # Backfill gym_id for existing documents that don't have it (legacy data). Store as string to match JWT.
+    default_gym_id_str = str(default_gym_id)
+    await members_collection.update_many(
+        {"gym_id": {"$exists": False}},
+        {"$set": {"gym_id": default_gym_id_str}},
+    )
+    await attendance_collection.update_many(
+        {"gym_id": {"$exists": False}},
+        {"$set": {"gym_id": default_gym_id_str}},
+    )
+    await payments_collection.update_many(
+        {"gym_id": {"$exists": False}},
+        {"$set": {"gym_id": default_gym_id_str}},
+    )
+    await invoices_collection.update_many(
+        {"gym_id": {"$exists": False}},
+        {"$set": {"gym_id": default_gym_id_str}},
+    )
+
     today = today_ist()
     cutoff = today - timedelta(days=90)
     cutoff_dt = datetime(cutoff.year, cutoff.month, cutoff.day, tzinfo=timezone.utc)
@@ -107,7 +149,6 @@ async def lifespan(app: FastAPI):
         {"$set": {"status": "Inactive"}},
     )
     yield
-    # shutdown if needed
     pass
 
 
@@ -287,6 +328,26 @@ class SuperAdminPatchAdminBody(BaseModel):
     is_active: bool | None = None
 
 
+class SuperAdminResetPasswordBody(BaseModel):
+    """Super admin: set a new password for a gym admin. Cannot recover existing password (stored hashed)."""
+    new_password: str = Field(..., min_length=6)
+
+
+class GymProfileResponse(BaseModel):
+    """Current gym's profile for gym_admin (name, logo, name on invoices)."""
+    id: str
+    name: str
+    logo_base64: str | None = None
+    invoice_name: str | None = None  # Name shown on invoices; defaults to name if not set
+
+
+class GymProfileUpdate(BaseModel):
+    """Gym admin can update their gym's display name, logo, and invoice name."""
+    name: str | None = None
+    logo_base64: str | None = None
+    invoice_name: str | None = None
+
+
 # ---------- Notifications (utils.send_notification) ----------
 def _notify_registration(name: str, email: str, phone: str):
     from utils import send_notification
@@ -341,6 +402,35 @@ def _require_super_admin(authorization: str | None = Header(None)):
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
+def get_gym_id(authorization: str | None = Header(None)) -> str:
+    """Require gym_admin JWT; return gym_id for multi-tenant scoping. Use on all gym-scoped endpoints."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authorization required")
+    token = authorization[7:].strip()
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        if payload.get("role") != "gym_admin":
+            raise HTTPException(status_code=403, detail="Gym admin access required")
+        gym_id = payload.get("gym_id") or ""
+        if not gym_id:
+            raise HTTPException(status_code=403, detail="Gym context missing")
+        return gym_id
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+
+def _gym_filter(gym_id: str):
+    """Return a query dict to filter by gym_id (matches both string and ObjectId in DB)."""
+    from bson import ObjectId
+    try:
+        oid = ObjectId(gym_id)
+        return {"gym_id": {"$in": [gym_id, oid]}}
+    except Exception:
+        return {"gym_id": gym_id}
+
+
 @app.post("/auth/login", response_model=LoginResponse)
 async def auth_login(body: LoginRequest):
     login_id = (body.login_id or "").strip()
@@ -361,6 +451,72 @@ async def auth_login(body: LoginRequest):
         return LoginResponse(token=token, role="gym_admin", login_id=login_id)
 
     raise HTTPException(status_code=401, detail="Invalid login or password")
+
+
+# ---------- Gym profile (gym_admin: get/update own gym name, logo, invoice name) ----------
+async def _gym_doc_from_gym_id(gym_id: str):
+    """Resolve gym document by gym_id (string). Returns None if not found."""
+    from bson import ObjectId
+    try:
+        oid = ObjectId(gym_id)
+    except Exception:
+        return None
+    return await gyms_collection.find_one({"_id": oid})
+
+
+@app.get("/gym/profile", response_model=GymProfileResponse)
+async def get_gym_profile(gym_id: str = Depends(get_gym_id)):
+    """Get current gym's profile (name, logo, invoice name). For gym_admin only."""
+    gym = await _gym_doc_from_gym_id(gym_id)
+    if not gym:
+        raise HTTPException(status_code=404, detail="Gym not found")
+    return GymProfileResponse(
+        id=str(gym["_id"]),
+        name=gym.get("name", ""),
+        logo_base64=gym.get("logo_base64"),
+        invoice_name=gym.get("invoice_name"),
+    )
+
+
+@app.patch("/gym/profile", response_model=GymProfileResponse)
+async def update_gym_profile(body: GymProfileUpdate, gym_id: str = Depends(get_gym_id)):
+    """Update current gym's name, logo, and/or invoice name. For gym_admin only."""
+    from bson import ObjectId
+    try:
+        oid = ObjectId(gym_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid gym ID")
+    gym = await gyms_collection.find_one({"_id": oid})
+    if not gym:
+        raise HTTPException(status_code=404, detail="Gym not found")
+    set_fields = {}
+    unset_fields = {}
+    if body.name is not None and body.name.strip():
+        set_fields["name"] = body.name.strip()
+    if body.logo_base64 is not None:
+        if body.logo_base64:
+            set_fields["logo_base64"] = body.logo_base64
+        else:
+            unset_fields["logo_base64"] = ""
+    if body.invoice_name is not None:
+        if body.invoice_name and body.invoice_name.strip():
+            set_fields["invoice_name"] = body.invoice_name.strip()
+        else:
+            unset_fields["invoice_name"] = ""
+    if set_fields or unset_fields:
+        update_op = {}
+        if set_fields:
+            update_op["$set"] = set_fields
+        if unset_fields:
+            update_op["$unset"] = unset_fields
+        await gyms_collection.update_one({"_id": oid}, update_op)
+    updated = await gyms_collection.find_one({"_id": oid})
+    return GymProfileResponse(
+        id=str(updated["_id"]),
+        name=updated.get("name", ""),
+        logo_base64=updated.get("logo_base64"),
+        invoice_name=updated.get("invoice_name"),
+    )
 
 
 # ---------- Super Admin: list/create/patch gym admins ----------
@@ -396,7 +552,10 @@ async def super_admin_create_admin(body: SuperAdminCreateAdminBody, _: dict = De
     gym_doc = {"name": body.gym_name.strip(), "created_at": datetime.now(timezone.utc)}
     gym_result = await gyms_collection.insert_one(gym_doc)
     gym_id = gym_result.inserted_id
-    password_hash = pwd_context.hash(body.admin_password)
+    try:
+        password_hash = pwd_context.hash(body.admin_password)
+    except Exception:
+        password_hash = _pwd_fallback.hash(body.admin_password)
     admin_doc = {
         "gym_id": gym_id,
         "login_id": body.admin_login_id.strip(),
@@ -418,6 +577,8 @@ async def super_admin_create_admin(body: SuperAdminCreateAdminBody, _: dict = De
 @app.patch("/super-admin/admins/{admin_id}", response_model=SuperAdminAdminListItem)
 async def super_admin_patch_admin(admin_id: str, body: SuperAdminPatchAdminBody, _: dict = Depends(_require_super_admin)):
     from bson import ObjectId
+    from datetime import timezone
+
     try:
         oid = ObjectId(admin_id)
     except Exception:
@@ -444,12 +605,44 @@ async def super_admin_patch_admin(admin_id: str, body: SuperAdminPatchAdminBody,
     )
 
 
+@app.patch("/super-admin/admins/{admin_id}/password", response_model=dict)
+async def super_admin_reset_admin_password(admin_id: str, body: SuperAdminResetPasswordBody, _: dict = Depends(_require_super_admin)):
+    """Super admin: set a new password for a gym admin. Existing password cannot be viewed (stored hashed)."""
+    from bson import ObjectId
+    from datetime import timezone
+
+    if admin_id == "legacy-default":
+        raise HTTPException(
+            status_code=400,
+            detail="Legacy default admin (9999999999) password is set by server config. Cannot reset from here.",
+        )
+
+    try:
+        oid = ObjectId(admin_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid admin ID")
+    doc = await gym_admins_collection.find_one({"_id": oid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Admin not found")
+
+    try:
+        password_hash = pwd_context.hash(body.new_password)
+    except Exception:
+        password_hash = _pwd_fallback.hash(body.new_password)
+    await gym_admins_collection.update_one(
+        {"_id": oid},
+        {"$set": {"password_hash": password_hash, "updated_at": datetime.now(timezone.utc)}},
+    )
+    return {"message": "Password reset successfully"}
+
+
 # ---------- Members: CRUD, lookup, attendance stats ----------
 
 @app.post("/members", response_model=MemberResponse)
-async def create_member(member: MemberCreate):
+async def create_member(member: MemberCreate, gym_id: str = Depends(get_gym_id)):
     from datetime import timezone
     doc = member.model_dump()
+    doc["gym_id"] = gym_id
     # Normalize phone for consistent lookup (member login uses by-phone)
     doc["phone"] = (doc.get("phone") or "").strip()
     doc["created_at"] = datetime.now(timezone.utc)
@@ -466,8 +659,8 @@ async def create_member(member: MemberCreate):
     monthly_amount = MONTHLY_FEE_PT if mt == "PT" else MONTHLY_FEE_REGULAR
     period = today.strftime("%Y-%m")
     await payments_collection.insert_many([
-        {"member_id": mid, "member_name": doc["name"], "amount": REGISTRATION_FEE, "fee_type": "registration", "period": None, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc)},
-        {"member_id": mid, "member_name": doc["name"], "amount": monthly_amount, "fee_type": "monthly", "period": period, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc)},
+        {"member_id": mid, "member_name": doc["name"], "amount": REGISTRATION_FEE, "fee_type": "registration", "period": None, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id},
+        {"member_id": mid, "member_name": doc["name"], "amount": monthly_amount, "fee_type": "monthly", "period": period, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id},
     ])
     _notify_registration(doc["name"], doc["email"], doc["phone"])
 
@@ -490,14 +683,16 @@ async def create_member(member: MemberCreate):
 
 
 @app.get("/members/{member_id}", response_model=MemberResponse)
-async def get_member_by_id(member_id: str):
-    """Get a single member by ID."""
+async def get_member_by_id(member_id: str, gym_id: str = Depends(get_gym_id)):
+    """Get a single member by ID. Member must belong to current gym."""
     from bson import ObjectId
     try:
         oid = ObjectId(member_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid member ID")
-    doc = await members_collection.find_one({"_id": oid})
+    q = {"_id": oid}
+    q.update(_gym_filter(gym_id))
+    doc = await members_collection.find_one(q)
     if not doc:
         raise HTTPException(status_code=404, detail="Member not found")
         
@@ -509,25 +704,30 @@ async def get_member_by_id(member_id: str):
 
 
 @app.get("/members/{member_id}/attendance-stats")
-async def member_attendance_stats(member_id: str):
+async def member_attendance_stats(member_id: str, gym_id: str = Depends(get_gym_id)):
     """Total visits, visits this month, and avg workout duration (minutes) for a member."""
     from bson import ObjectId
     try:
         oid = ObjectId(member_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid member ID")
-    if await members_collection.find_one({"_id": oid}) is None:
+    member_q = {"_id": oid}
+    member_q.update(_gym_filter(gym_id))
+    if await members_collection.find_one(member_q) is None:
         raise HTTPException(status_code=404, detail="Member not found")
-    total_visits = await attendance_collection.count_documents({"member_id": member_id})
+    att_q = {"member_id": member_id}
+    att_q.update(_gym_filter(gym_id))
+    total_visits = await attendance_collection.count_documents(att_q)
     today = today_ist()
     month_start = today.replace(day=1).strftime("%Y-%m-%d")
     month_end = today.strftime("%Y-%m-%d")
     visits_this_month = await attendance_collection.count_documents({
         "member_id": member_id,
         "date_ist": {"$gte": month_start, "$lte": month_end},
+        **(_gym_filter(gym_id)),
     })
     cursor = attendance_collection.find(
-        {"member_id": member_id, "check_out_at_utc": {"$exists": True, "$ne": None}}
+        {"member_id": member_id, "check_out_at_utc": {"$exists": True, "$ne": None}, **_gym_filter(gym_id)}
     )
     durations_min = []
     async for doc in cursor:
@@ -568,15 +768,18 @@ async def get_member_by_phone(phone: str):
 
 
 @app.get("/members", response_model=list[MemberResponse])
-async def list_members(skip: int = 0, limit: int = 100, brief: bool = False):
+async def list_members(skip: int = 0, limit: int = 100, brief: bool = False, gym_id: str = Depends(get_gym_id)):
     """List members. brief=True omits photo_base64 and id_document_base64 for faster list load. Use skip/limit for pagination."""
     skip = max(0, skip)
     limit = min(max(1, limit), 500)  # Cap at 500 for performance/security
-    cursor = members_collection.find().sort("created_at", -1).skip(skip).limit(limit)
+    q = _gym_filter(gym_id)
+    cursor = members_collection.find(q).sort("created_at", -1).skip(skip).limit(limit)
     
-    # Fetch today's attendance for these members
+    # Fetch today's attendance for these members (same gym)
     date_ist_str = today_ist().strftime("%Y-%m-%d")
-    att_cursor = attendance_collection.find({"date_ist": date_ist_str})
+    att_q = {"date_ist": date_ist_str}
+    att_q.update(_gym_filter(gym_id))
+    att_cursor = attendance_collection.find(att_q)
     attendance_map = {}
     async for doc in att_cursor:
         attendance_map[doc["member_id"]] = doc
@@ -590,13 +793,15 @@ async def list_members(skip: int = 0, limit: int = 100, brief: bool = False):
 
 
 @app.patch("/members/{member_id}", response_model=MemberResponse)
-async def update_member(member_id: str, body: MemberUpdate):
+async def update_member(member_id: str, body: MemberUpdate, gym_id: str = Depends(get_gym_id)):
     """Admin: edit member details (name, phone, email, batch, status, PT fields, etc.) for corrections."""
     from bson import ObjectId
     try:
         oid = ObjectId(member_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid member ID")
+    member_q = {"_id": oid}
+    member_q.update(_gym_filter(gym_id))
     update = {}
     if body.name is not None:
         update["name"] = body.name
@@ -615,12 +820,12 @@ async def update_member(member_id: str, body: MemberUpdate):
     if body.diet_chart is not None:
         update["diet_chart"] = body.diet_chart
     if not update:
-        result = await members_collection.find_one({"_id": oid})
+        result = await members_collection.find_one(member_q)
         if not result:
             raise HTTPException(status_code=404, detail="Member not found")
         return _doc_to_member_response(result)
     result = await members_collection.find_one_and_update(
-        {"_id": oid},
+        member_q,
         {"$set": update},
         return_document=True,
     )
@@ -635,18 +840,20 @@ async def update_member(member_id: str, body: MemberUpdate):
 
 
 @app.patch("/members/{member_id}/photo", response_model=MemberResponse)
-async def update_member_photo(member_id: str, body: PhotoUpdate):
+async def update_member_photo(member_id: str, body: PhotoUpdate, gym_id: str = Depends(get_gym_id)):
     """Upload or remove member profile picture. Both member and admin can call this. Send photo_base64: null to delete."""
     from bson import ObjectId
     try:
         oid = ObjectId(member_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid member ID")
+    member_q = {"_id": oid}
+    member_q.update(_gym_filter(gym_id))
     if body.photo_base64 is None:
-        await members_collection.update_one({"_id": oid}, {"$unset": {"photo_base64": ""}})
+        await members_collection.update_one(member_q, {"$unset": {"photo_base64": ""}})
     else:
-        await members_collection.update_one({"_id": oid}, {"$set": {"photo_base64": body.photo_base64}})
-    doc = await members_collection.find_one({"_id": oid})
+        await members_collection.update_one(member_q, {"$set": {"photo_base64": body.photo_base64}})
+    doc = await members_collection.find_one(member_q)
     if not doc:
         raise HTTPException(status_code=404, detail="Member not found")
         
@@ -658,21 +865,23 @@ async def update_member_photo(member_id: str, body: PhotoUpdate):
 
 
 @app.patch("/members/{member_id}/id-document", response_model=MemberResponse)
-async def update_member_id_document(member_id: str, body: IdDocumentUpdate):
+async def update_member_id_document(member_id: str, body: IdDocumentUpdate, gym_id: str = Depends(get_gym_id)):
     """Upload or remove identity document (Aadhar, Driving Licence, Voter ID, Passport). Send id_document_base64: null to delete."""
     from bson import ObjectId
     try:
         oid = ObjectId(member_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid member ID")
+    member_q = {"_id": oid}
+    member_q.update(_gym_filter(gym_id))
     if body.id_document_base64 is None:
-        await members_collection.update_one({"_id": oid}, {"$unset": {"id_document_base64": "", "id_document_type": ""}})
+        await members_collection.update_one(member_q, {"$unset": {"id_document_base64": "", "id_document_type": ""}})
     else:
         update = {"id_document_base64": body.id_document_base64}
         if body.id_document_type is not None:
             update["id_document_type"] = body.id_document_type
-        await members_collection.update_one({"_id": oid}, {"$set": update})
-    doc = await members_collection.find_one({"_id": oid})
+        await members_collection.update_one(member_q, {"$set": update})
+    doc = await members_collection.find_one(member_q)
     if not doc:
         raise HTTPException(status_code=404, detail="Member not found")
         
@@ -728,7 +937,7 @@ def _to_date(v):
 # ---------- Attendance: check-in/check-out (IST), by date, summary ----------
 
 @app.post("/attendance/check-in/{member_id}", response_model=AttendanceRecord)
-async def check_in(member_id: str):
+async def check_in(member_id: str, gym_id: str = Depends(get_gym_id)):
     """Record check-in in IST. One check-in per member per calendar day (IST)."""
     from bson import ObjectId
     from datetime import timezone
@@ -739,7 +948,9 @@ async def check_in(member_id: str):
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid member ID")
 
-        member = await members_collection.find_one({"_id": oid})
+        member_q = {"_id": oid}
+        member_q.update(_gym_filter(gym_id))
+        member = await members_collection.find_one(member_q)
         if not member:
             raise HTTPException(status_code=404, detail="Member not found")
 
@@ -748,7 +959,7 @@ async def check_in(member_id: str):
         batch = batch_from_ist(now)
 
         already_today = await attendance_collection.find_one(
-            {"member_id": member_id, "date_ist": date_ist_str},
+            {"member_id": member_id, "date_ist": date_ist_str, **_gym_filter(gym_id)},
         )
         if already_today:
             raise HTTPException(
@@ -758,9 +969,9 @@ async def check_in(member_id: str):
 
         if BATCH_CAPACITY and batch in BATCH_CAPACITY:
             cap = BATCH_CAPACITY[batch]
-            count_today_batch = await attendance_collection.count_documents(
-                {"date_ist": date_ist_str, "batch": batch}
-            )
+            batch_q = {"date_ist": date_ist_str, "batch": batch}
+            batch_q.update(_gym_filter(gym_id))
+            count_today_batch = await attendance_collection.count_documents(batch_q)
             if count_today_batch >= cap:
                 raise HTTPException(
                     status_code=400,
@@ -770,6 +981,7 @@ async def check_in(member_id: str):
         check_in_at_utc = now.astimezone(timezone.utc)
         doc = {
             "member_id": member_id,
+            "gym_id": gym_id,
             "check_in_at_utc": check_in_at_utc,
             "check_in_at_ist": now.isoformat(),
             "date_ist": date_ist_str,
@@ -782,7 +994,7 @@ async def check_in(member_id: str):
         today_date = now.date()
         last_attendance_dt = datetime(today_date.year, today_date.month, today_date.day, tzinfo=timezone.utc)
         await members_collection.update_one(
-            {"_id": oid},
+            member_q,
             {"$set": {"last_attendance_date": last_attendance_dt}},
         )
 
@@ -855,18 +1067,21 @@ async def _attendance_docs_to_records(cursor) -> list:
 
 
 @app.get("/attendance/summary")
-async def attendance_summary():
+async def attendance_summary(gym_id: str = Depends(get_gym_id)):
     """Today's check-ins, currently in gym, this week count, average daily (for dashboard cards)."""
     from datetime import timedelta
+    q = _gym_filter(gym_id)
     date_ist_str = today_ist().strftime("%Y-%m-%d")
-    today_count = await attendance_collection.count_documents({"date_ist": date_ist_str})
+    today_count = await attendance_collection.count_documents({**q, "date_ist": date_ist_str})
     today_check_outs = await attendance_collection.count_documents({
+        **q,
         "date_ist": date_ist_str,
         "check_out_at_ist": {"$exists": True, "$ne": None, "$ne": ""},
     })
     currently_in = today_count - today_check_outs
     week_start = (today_ist() - timedelta(days=6)).strftime("%Y-%m-%d")
     this_week = await attendance_collection.count_documents({
+        **q,
         "date_ist": {"$gte": week_start, "$lte": date_ist_str},
     })
     average_daily = round(this_week / 7.0, 1) if this_week else 0
@@ -879,35 +1094,35 @@ async def attendance_summary():
 
 
 @app.get("/attendance/today", response_model=list[AttendanceRecord])
-async def attendance_today():
+async def attendance_today(gym_id: str = Depends(get_gym_id)):
     """All check-ins for current date in IST."""
     date_ist_str = today_ist().strftime("%Y-%m-%d")
-    return await attendance_by_date(date_ist_str)
+    return await attendance_by_date(date_ist_str, gym_id)
 
 
 @app.get("/attendance/by-date", response_model=list[AttendanceRecord])
-async def attendance_by_date_endpoint(date: str):
+async def attendance_by_date_endpoint(date: str, gym_id: str = Depends(get_gym_id)):
     """All check-ins for a given date (YYYY-MM-DD). Use for date picker."""
     if len(date) != 10 or date[4] != "-" or date[7] != "-":
         raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
-    return await attendance_by_date(date)
+    return await attendance_by_date(date, gym_id)
 
 
 @app.get("/attendance/by-date-range", response_model=list[AttendanceRecord])
-async def attendance_by_date_range(date_from: str, date_to: str):
+async def attendance_by_date_range(date_from: str, date_to: str, gym_id: str = Depends(get_gym_id)):
     """All check-ins in date range (YYYY-MM-DD). For daily/monthly/historical view."""
     if len(date_from) != 10 or date_from[4] != "-" or date_from[7] != "-" or len(date_to) != 10 or date_to[4] != "-" or date_to[7] != "-":
         raise HTTPException(status_code=400, detail="date_from and date_to must be YYYY-MM-DD")
     if date_from > date_to:
         raise HTTPException(status_code=400, detail="date_from must be <= date_to")
-    cursor = attendance_collection.find(
-        {"date_ist": {"$gte": date_from, "$lte": date_to}}
-    ).sort([("date_ist", 1), ("batch", 1), ("check_in_at_utc", 1)])
+    q = {"date_ist": {"$gte": date_from, "$lte": date_to}}
+    q.update(_gym_filter(gym_id))
+    cursor = attendance_collection.find(q).sort([("date_ist", 1), ("batch", 1), ("check_in_at_utc", 1)])
     return await _attendance_docs_to_records(cursor)
 
 
 @app.post("/attendance/check-out/{member_id}", response_model=AttendanceRecord)
-async def check_out(member_id: str):
+async def check_out(member_id: str, gym_id: str = Depends(get_gym_id)):
     """Record check-out for today's check-in (IST)."""
     from bson import ObjectId
     from datetime import timezone
@@ -915,11 +1130,15 @@ async def check_out(member_id: str):
         oid = ObjectId(member_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid member ID")
-    member = await members_collection.find_one({"_id": oid})
+    member_q = {"_id": oid}
+    member_q.update(_gym_filter(gym_id))
+    member = await members_collection.find_one(member_q)
     if not member:
         raise HTTPException(status_code=404, detail="Member not found")
     date_ist_str = today_ist().strftime("%Y-%m-%d")
-    doc = await attendance_collection.find_one({"member_id": member_id, "date_ist": date_ist_str})
+    att_q = {"member_id": member_id, "date_ist": date_ist_str}
+    att_q.update(_gym_filter(gym_id))
+    doc = await attendance_collection.find_one(att_q)
     if not doc:
         raise HTTPException(status_code=400, detail="No check-in found for today. Check in first.")
     if doc.get("check_out_at_ist"):
@@ -943,20 +1162,24 @@ async def _async_iter(items):
         yield x
 
 
-async def attendance_by_date(date_ist_str: str) -> list:
-    cursor = attendance_collection.find({"date_ist": date_ist_str}).sort([("batch", 1), ("check_in_at_utc", 1)])
+async def attendance_by_date(date_ist_str: str, gym_id: str) -> list:
+    q = {"date_ist": date_ist_str}
+    q.update(_gym_filter(gym_id))
+    cursor = attendance_collection.find(q).sort([("batch", 1), ("check_in_at_utc", 1)])
     return await _attendance_docs_to_records(cursor)
 
 
 @app.delete("/attendance/{attendance_id}")
-async def delete_attendance(attendance_id: str):
+async def delete_attendance(attendance_id: str, gym_id: str = Depends(get_gym_id)):
     """Admin: remove a check-in record (e.g. wrong person or duplicate)."""
     from bson import ObjectId
     try:
         oid = ObjectId(attendance_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid attendance ID")
-    result = await attendance_collection.delete_one({"_id": oid})
+    q = {"_id": oid}
+    q.update(_gym_filter(gym_id))
+    result = await attendance_collection.delete_one(q)
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Attendance record not found")
     return {"message": "Attendance record deleted"}
@@ -966,7 +1189,7 @@ INACTIVE_DAYS_THRESHOLD = 90
 
 
 @app.post("/admin/mark-inactive-by-attendance")
-async def mark_inactive_by_attendance():
+async def mark_inactive_by_attendance(gym_id: str = Depends(get_gym_id)):
     """
     Only mark Inactive when last_attendance_date exists and is older than 90 days (IST).
     Members who have never checked in (no last_attendance_date) are left unchanged.
@@ -976,8 +1199,10 @@ async def mark_inactive_by_attendance():
     today = today_ist()
     cutoff = today - timedelta(days=INACTIVE_DAYS_THRESHOLD)
     cutoff_dt = datetime(cutoff.year, cutoff.month, cutoff.day, tzinfo=timezone.utc)
+    q = {"last_attendance_date": {"$exists": True, "$lt": cutoff_dt}}
+    q.update(_gym_filter(gym_id))
     result = await members_collection.update_many(
-        {"last_attendance_date": {"$exists": True, "$lt": cutoff_dt}},
+        q,
         {"$set": {"status": "Inactive"}},
     )
     return {"updated_count": result.modified_count, "cutoff_date_ist": cutoff.isoformat()}
@@ -988,10 +1213,10 @@ async def mark_inactive_by_attendance():
 # ---------- Payments: list, fees summary, log monthly, mark paid ----------
 
 @app.get("/payments", response_model=list[PaymentResponse])
-async def list_payments(member_id: str | None = None, status: str | None = None, limit: int = 1000):
+async def list_payments(member_id: str | None = None, status: str | None = None, limit: int = 1000, gym_id: str = Depends(get_gym_id)):
     """List payments. Filter by member_id and/or status (Paid/Due/Overdue). Capped at 1000 for performance."""
     from datetime import timezone
-    q = {}
+    q = _gym_filter(gym_id)
     if member_id:
         q["member_id"] = member_id
     if status:
@@ -1016,12 +1241,14 @@ async def list_payments(member_id: str | None = None, status: str | None = None,
 
 
 @app.get("/payments/fees-summary")
-async def fees_summary():
+async def fees_summary(gym_id: str = Depends(get_gym_id)):
     """Paid/Due/Overdue counts and total amounts for Fees Management tab."""
     from datetime import timezone
     today = today_ist()
     today_dt = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
+    q = _gym_filter(gym_id)
     pipeline = [
+        {"$match": q},
         {"$group": {"_id": "$status", "count": {"$sum": 1}, "total_amount": {"$sum": "$amount"}}}
     ]
     cursor = payments_collection.aggregate(pipeline)
@@ -1038,7 +1265,7 @@ async def fees_summary():
             overdue, overdue_amt = c, a
     # Mark Due -> Overdue where due_date < today
     await payments_collection.update_many(
-        {"status": "Due", "due_date": {"$lt": today_dt}},
+        {**q, "status": "Due", "due_date": {"$lt": today_dt}},
         {"$set": {"status": "Overdue"}},
     )
     # Re-run summary after update
@@ -1075,7 +1302,7 @@ class LogMonthlyPaymentBody(BaseModel):
 
 
 @app.post("/payments/log-monthly", response_model=PaymentResponse)
-async def log_monthly_payment(body: LogMonthlyPaymentBody):
+async def log_monthly_payment(body: LogMonthlyPaymentBody, gym_id: str = Depends(get_gym_id)):
     """Create a monthly payment record marked as Paid (for existing member payment logging)."""
     from bson import ObjectId
     from datetime import timezone
@@ -1083,7 +1310,9 @@ async def log_monthly_payment(body: LogMonthlyPaymentBody):
         oid = ObjectId(body.member_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid member ID")
-    member = await members_collection.find_one({"_id": oid})
+    member_q = {"_id": oid}
+    member_q.update(_gym_filter(gym_id))
+    member = await members_collection.find_one(member_q)
     if not member:
         raise HTTPException(status_code=404, detail="Member not found")
     if body.amount not in (500, 2000):
@@ -1103,6 +1332,7 @@ async def log_monthly_payment(body: LogMonthlyPaymentBody):
         "due_date": pay_date,
         "paid_at": pay_date,
         "created_at": datetime.now(timezone.utc),
+        "gym_id": gym_id,
     }
     result = await payments_collection.insert_one(doc)
     doc["_id"] = result.inserted_id
@@ -1117,6 +1347,7 @@ async def log_monthly_payment(body: LogMonthlyPaymentBody):
         "status": "Paid",
         "issued_at": datetime.now(timezone.utc),
         "paid_at": pay_date,
+        "gym_id": gym_id,
     }
     await invoices_collection.insert_one(inv_doc)
 
@@ -1135,21 +1366,23 @@ async def log_monthly_payment(body: LogMonthlyPaymentBody):
 
 
 @app.patch("/payments/{payment_id}", response_model=PaymentResponse)
-async def update_payment_status(payment_id: str, body: PaymentStatusUpdate):
+async def update_payment_status(payment_id: str, body: PaymentStatusUpdate, gym_id: str = Depends(get_gym_id)):
     """Admin: edit payment status for corrections (e.g. revert Paid to Due)."""
     from bson import ObjectId
     try:
         oid = ObjectId(payment_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid payment ID")
-    doc = await payments_collection.find_one({"_id": oid})
+    pay_q = {"_id": oid}
+    pay_q.update(_gym_filter(gym_id))
+    doc = await payments_collection.find_one(pay_q)
     if not doc:
         raise HTTPException(status_code=404, detail="Payment not found")
     update = {"status": body.status}
     if body.status != "Paid":
         update["paid_at"] = None
-    await payments_collection.update_one({"_id": oid}, {"$set": update})
-    updated = await payments_collection.find_one({"_id": oid})
+    await payments_collection.update_one(pay_q, {"$set": update})
+    updated = await payments_collection.find_one(pay_q)
     return PaymentResponse(
         id=str(updated["_id"]),
         member_id=updated["member_id"],
@@ -1165,7 +1398,7 @@ async def update_payment_status(payment_id: str, body: PaymentStatusUpdate):
 
 
 @app.post("/payments/pay", response_model=PaymentResponse)
-async def record_payment(member_id: str, payment_id: str, background_tasks: BackgroundTasks):
+async def record_payment(member_id: str, payment_id: str, background_tasks: BackgroundTasks, gym_id: str = Depends(get_gym_id)):
     """Record a payment (simulated). Sends payment-received notification."""
     from bson import ObjectId
     from datetime import timezone
@@ -1173,20 +1406,24 @@ async def record_payment(member_id: str, payment_id: str, background_tasks: Back
         oid = ObjectId(payment_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid payment ID")
-    doc = await payments_collection.find_one({"_id": oid, "member_id": member_id})
+    pay_q = {"_id": oid, "member_id": member_id}
+    pay_q.update(_gym_filter(gym_id))
+    doc = await payments_collection.find_one(pay_q)
     if not doc:
         raise HTTPException(status_code=404, detail="Payment not found")
     if doc["status"] == "Paid":
         raise HTTPException(status_code=400, detail="Already paid")
     now = datetime.now(timezone.utc)
     await payments_collection.update_one(
-        {"_id": oid},
+        pay_q,
         {"$set": {"status": "Paid", "paid_at": now}},
     )
-    member = await members_collection.find_one({"_id": ObjectId(member_id)})
+    member_q = {"_id": ObjectId(member_id)}
+    member_q.update(_gym_filter(gym_id))
+    member = await members_collection.find_one(member_q)
     if member:
         background_tasks.add_task(_notify_payment_received, member.get("name", ""), doc["amount"], member.get("email", ""), member.get("phone", ""))
-    updated = await payments_collection.find_one({"_id": oid})
+    updated = await payments_collection.find_one(pay_q)
     return PaymentResponse(
         id=str(updated["_id"]),
         member_id=updated["member_id"],
@@ -1204,32 +1441,34 @@ async def record_payment(member_id: str, payment_id: str, background_tasks: Back
 # ---------- Analytics: dashboard counts, fee reminders, admin helpers ----------
 
 @app.get("/analytics/dashboard")
-async def analytics_dashboard(date_from: str | None = None, date_to: str | None = None):
+async def analytics_dashboard(date_from: str | None = None, date_to: str | None = None, gym_id: str = Depends(get_gym_id)):
     """
     Total Active/Inactive, Total Collections (₹), Pending Dues, Regular vs PT split.
     Optional date_from, date_to (YYYY-MM-DD): add attendance_count_in_range and payments_received_in_range for that period.
     """
     from datetime import timezone
-    active = await members_collection.count_documents({"status": "Active"})
-    inactive = await members_collection.count_documents({"status": "Inactive"})
-    regular = await members_collection.count_documents({"membership_type": "Regular"})
-    pt = await members_collection.count_documents({"membership_type": "PT"})
-    pipeline_pending = [{"$match": {"status": {"$in": ["Due", "Overdue"]}}}, {"$group": {"_id": None, "total": {"$sum": "$amount"}}}]
+    q = _gym_filter(gym_id)
+    active = await members_collection.count_documents({**q, "status": "Active"})
+    inactive = await members_collection.count_documents({**q, "status": "Inactive"})
+    regular = await members_collection.count_documents({**q, "membership_type": "Regular"})
+    pt = await members_collection.count_documents({**q, "membership_type": "PT"})
+    pipeline_pending = [{"$match": {**q, "status": {"$in": ["Due", "Overdue"]}}}, {"$group": {"_id": None, "total": {"$sum": "$amount"}}}]
     cur = payments_collection.aggregate(pipeline_pending)
     pending_fees = 0
     async for row in cur:
         pending_fees = row["total"]
         break
-    pipeline_paid = [{"$match": {"status": "Paid"}}, {"$group": {"_id": None, "total": {"$sum": "$amount"}}}]
+    pipeline_paid = [{"$match": {**q, "status": "Paid"}}, {"$group": {"_id": None, "total": {"$sum": "$amount"}}}]
     cur2 = payments_collection.aggregate(pipeline_paid)
     total_collections = 0
     async for row in cur2:
         total_collections = row["total"]
         break
     date_ist_str = today_ist().strftime("%Y-%m-%d")
-    today_attendance_count = await attendance_collection.count_documents({"date_ist": date_ist_str})
+    att_q = {**q, "date_ist": date_ist_str}
+    today_attendance_count = await attendance_collection.count_documents(att_q)
     today_check_outs = await attendance_collection.count_documents({
-        "date_ist": date_ist_str,
+        **att_q,
         "check_out_at_ist": {"$exists": True, "$ne": None, "$ne": ""},
     })
     today_currently_in = today_attendance_count - today_check_outs
@@ -1254,10 +1493,11 @@ async def analytics_dashboard(date_from: str | None = None, date_to: str | None 
         start_utc = start.astimezone(timezone.utc)
         end_utc = end.astimezone(timezone.utc)
         attendance_in_range = await attendance_collection.count_documents({
+            **q,
             "check_in_at_utc": {"$gte": start_utc, "$lte": end_utc},
         })
         pipeline_paid_range = [
-            {"$match": {"status": "Paid", "paid_at": {"$gte": start_utc, "$lte": end_utc}}},
+            {"$match": {**q, "status": "Paid", "paid_at": {"$gte": start_utc, "$lte": end_utc}}},
             {"$group": {"_id": None, "total": {"$sum": "$amount"}, "count": {"$sum": 1}}},
         ]
         cur3 = payments_collection.aggregate(pipeline_paid_range)
@@ -1276,11 +1516,13 @@ async def analytics_dashboard(date_from: str | None = None, date_to: str | None 
 
 
 @app.post("/admin/run-fee-reminders")
-async def run_fee_reminders(background_tasks: BackgroundTasks):
+async def run_fee_reminders(background_tasks: BackgroundTasks, gym_id: str = Depends(get_gym_id)):
     """Send Payment Reminders: simulated WhatsApp to all members with unpaid fees."""
     from utils import send_notification
     from bson import ObjectId
-    cursor = payments_collection.find({"status": {"$in": ["Due", "Overdue"]}})
+    q = _gym_filter(gym_id)
+    q["status"] = {"$in": ["Due", "Overdue"]}
+    cursor = payments_collection.find(q)
     member_pending = {}
     async for doc in cursor:
         mid = doc["member_id"]
@@ -1289,7 +1531,9 @@ async def run_fee_reminders(background_tasks: BackgroundTasks):
         member_pending[mid] += doc["amount"]
     sent = 0
     for mid, pending_amount in member_pending.items():
-        member = await members_collection.find_one({"_id": ObjectId(mid)})
+        member_q = {"_id": ObjectId(mid)}
+        member_q.update(_gym_filter(gym_id))
+        member = await members_collection.find_one(member_q)
         if member:
             background_tasks.add_task(
                 send_notification,
@@ -1302,7 +1546,7 @@ async def run_fee_reminders(background_tasks: BackgroundTasks):
 
 
 @app.post("/admin/seed-inactive-test")
-async def seed_inactive_test():
+async def seed_inactive_test(gym_id: str = Depends(get_gym_id)):
     """
     Creates 2 dummy members with last_attendance_date set to 91 days ago (IST).
     Use this to test the 90-day automation: run this, then run Mark inactive (90d) to see them turn Inactive.
@@ -1323,6 +1567,7 @@ async def seed_inactive_test():
             "status": "Active",
             "created_at": datetime.now(timezone.utc),
             "last_attendance_date": old_dt,
+            "gym_id": gym_id,
         },
         {
             "name": "Another Test (90d ago)",
@@ -1333,6 +1578,7 @@ async def seed_inactive_test():
             "status": "Active",
             "created_at": datetime.now(timezone.utc),
             "last_attendance_date": old_dt,
+            "gym_id": gym_id,
         },
     ]
     inserted = []
@@ -1356,7 +1602,7 @@ class BillingIssueWalkIn(BaseModel):
 # ---------- Billing: walk-in (new member + first bill), history, mark paid ----------
 
 @app.post("/billing/issue", response_model=InvoiceResponse)
-async def billing_issue(body: BillingIssueWalkIn):
+async def billing_issue(body: BillingIssueWalkIn, gym_id: str = Depends(get_gym_id)):
     """Walk-in flow: create member and issue first bill (Registration + 1st Month)."""
     from datetime import timezone
     from bson import ObjectId
@@ -1368,6 +1614,7 @@ async def billing_issue(body: BillingIssueWalkIn):
         "batch": body.batch.value,
         "status": "Active",
         "created_at": datetime.now(timezone.utc),
+        "gym_id": gym_id,
     }
     result = await members_collection.insert_one(doc)
     mid = str(result.inserted_id)
@@ -1386,13 +1633,14 @@ async def billing_issue(body: BillingIssueWalkIn):
         "status": "Unpaid",
         "issued_at": datetime.now(timezone.utc),
         "paid_at": None,
+        "gym_id": gym_id,
     }
     inv_result = await invoices_collection.insert_one(inv_doc)
     due_dt = datetime(today_ist().year, today_ist().month, today_ist().day, tzinfo=timezone.utc)
     period = today_ist().strftime("%Y-%m")
     await payments_collection.insert_many([
-        {"member_id": mid, "member_name": body.name, "amount": reg_amount, "fee_type": "registration", "period": None, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc)},
-        {"member_id": mid, "member_name": body.name, "amount": monthly_amount, "fee_type": "monthly", "period": period, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc)},
+        {"member_id": mid, "member_name": body.name, "amount": reg_amount, "fee_type": "registration", "period": None, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id},
+        {"member_id": mid, "member_name": body.name, "amount": monthly_amount, "fee_type": "monthly", "period": period, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id},
     ])
     _notify_registration(body.name, body.email, body.phone)
     return InvoiceResponse(
@@ -1413,9 +1661,10 @@ async def billing_history(
     search: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    gym_id: str = Depends(get_gym_id),
 ):
     """List invoices. Optional: member_id, search (invoice id or member name), date_from, date_to (YYYY-MM-DD)."""
-    q = {}
+    q = _gym_filter(gym_id)
     if member_id:
         q["member_id"] = member_id
     if search and search.strip():
@@ -1462,7 +1711,7 @@ async def billing_history(
 
 
 @app.post("/billing/pay", response_model=InvoiceResponse)
-async def billing_pay(invoice_id: str, background_tasks: BackgroundTasks):
+async def billing_pay(invoice_id: str, background_tasks: BackgroundTasks, gym_id: str = Depends(get_gym_id)):
     """Mark invoice as paid. Simulated UPI/cash. Sends payment notification."""
     from bson import ObjectId
     from datetime import timezone
@@ -1470,17 +1719,21 @@ async def billing_pay(invoice_id: str, background_tasks: BackgroundTasks):
         oid = ObjectId(invoice_id)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid invoice ID")
-    doc = await invoices_collection.find_one({"_id": oid})
+    inv_q = {"_id": oid}
+    inv_q.update(_gym_filter(gym_id))
+    doc = await invoices_collection.find_one(inv_q)
     if not doc:
         raise HTTPException(status_code=404, detail="Invoice not found")
     if doc.get("status") == "Paid":
         raise HTTPException(status_code=400, detail="Already paid")
     now = datetime.now(timezone.utc)
-    await invoices_collection.update_one({"_id": oid}, {"$set": {"status": "Paid", "paid_at": now}})
-    member = await members_collection.find_one({"_id": ObjectId(doc["member_id"])})
+    await invoices_collection.update_one(inv_q, {"$set": {"status": "Paid", "paid_at": now}})
+    member_q = {"_id": ObjectId(doc["member_id"])}
+    member_q.update(_gym_filter(gym_id))
+    member = await members_collection.find_one(member_q)
     if member:
         background_tasks.add_task(_notify_payment_received, member.get("name", ""), doc["total"], member.get("email", ""), member.get("phone", ""))
-    updated = await invoices_collection.find_one({"_id": oid})
+    updated = await invoices_collection.find_one(inv_q)
     return InvoiceResponse(
         id=str(updated["_id"]),
         member_id=updated["member_id"],
@@ -1496,10 +1749,11 @@ async def billing_pay(invoice_id: str, background_tasks: BackgroundTasks):
 # ---------- Export to Excel (billing, members, payments) ----------
 
 @app.get("/export/billing")
-async def export_billing_excel():
+async def export_billing_excel(gym_id: str = Depends(get_gym_id)):
     """Export billing/invoices to Excel."""
     import pandas as pd
-    cursor = invoices_collection.find().sort("issued_at", -1)
+    q = _gym_filter(gym_id)
+    cursor = invoices_collection.find(q).sort("issued_at", -1)
     rows = []
     async for doc in cursor:
         rows.append({
@@ -1519,10 +1773,11 @@ async def export_billing_excel():
 
 
 @app.get("/export/members")
-async def export_members_excel():
+async def export_members_excel(gym_id: str = Depends(get_gym_id)):
     """Export members list to Excel."""
     import pandas as pd
-    cursor = members_collection.find().sort("created_at", -1)
+    q = _gym_filter(gym_id)
+    cursor = members_collection.find(q).sort("created_at", -1)
     rows = []
     async for doc in cursor:
         rows.append({
@@ -1543,10 +1798,11 @@ async def export_members_excel():
 
 
 @app.get("/export/payments")
-async def export_payments_excel():
+async def export_payments_excel(gym_id: str = Depends(get_gym_id)):
     """Export payments list to Excel."""
     import pandas as pd
-    cursor = payments_collection.find().sort("created_at", -1)
+    q = _gym_filter(gym_id)
+    cursor = payments_collection.find(q).sort("created_at", -1)
     rows = []
     async for doc in cursor:
         rows.append({

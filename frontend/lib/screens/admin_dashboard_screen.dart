@@ -15,11 +15,13 @@ import 'package:google_fonts/google_fonts.dart';
 import '../core/api_client.dart';
 import '../core/date_utils.dart';
 import '../core/export_helper.dart';
+import '../core/secure_storage.dart';
 import '../theme/app_theme.dart';
 import 'login_screen.dart';
 import 'attendance_report_screen.dart';
 import 'billing_screen.dart';
 import 'dashboard_screen.dart';
+import 'gym_settings_screen.dart';
 import 'member_detail_screen.dart';
 import 'registration_screen.dart';
 
@@ -43,14 +45,20 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Timer? _sessionTimer;
   static const Duration _sessionTimeout = Duration(minutes: 15);
 
+  Map<String, dynamic>? _gymProfile;
+
   @override
   void initState() {
     super.initState();
+    _loadGymProfile();
     _sessionTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (!mounted) return;
       if (DateTime.now().difference(_lastActivityAt) > _sessionTimeout) {
         _sessionTimer?.cancel();
         _sessionTimer = null;
+        ApiClient.setAuthToken(null);
+        SecureStorage.setAuthToken(null);
+        SecureStorage.setAuthRole(null);
         Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const LoginScreen()),
           (_) => false,
@@ -72,24 +80,65 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     _lastActivityAt = DateTime.now();
   }
 
+  Future<void> _loadGymProfile() async {
+    try {
+      final r = await ApiClient.instance.get('/gym/profile', useCache: true);
+      if (mounted && r.statusCode >= 200 && r.statusCode < 300) {
+        setState(() => _gymProfile = jsonDecode(r.body) as Map<String, dynamic>?);
+      }
+    } catch (_) {}
+  }
+
+  Widget _defaultLogoWidget() {
+    return Image.asset(
+      defaultLogoAsset,
+      height: 32,
+      width: 32,
+      fit: BoxFit.contain,
+      errorBuilder: (_, __, ___) => Container(
+        width: 32,
+        height: 32,
+        decoration: BoxDecoration(
+          color: AppTheme.primary.withOpacity(0.2),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Icon(Icons.fitness_center, color: AppTheme.primary, size: 20),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final profile = _gymProfile;
+    final String displayName = (profile != null && (profile['name'] as String?)?.trim().isNotEmpty == true)
+        ? (profile['name'] as String).trim()
+        : defaultGymName;
+    final bool hasCustomLogo = profile != null && (profile['logo_base64'] as String?)?.trim().isNotEmpty == true;
     return Scaffold(
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Image.asset('assets/logo.png', height: 32, width: 32, fit: BoxFit.contain, errorBuilder: (_, __, ___) => Container(
-              width: 32, height: 32, decoration: BoxDecoration(color: AppTheme.primary.withOpacity(0.2), borderRadius: BorderRadius.circular(8)),
-              child: const Icon(Icons.fitness_center, color: AppTheme.primary, size: 20),
-            )),
+            if (hasCustomLogo && profile != null)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.memory(
+                  base64Decode(profile['logo_base64'] as String),
+                  height: 32,
+                  width: 32,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => _defaultLogoWidget(),
+                ),
+              )
+            else
+              _defaultLogoWidget(),
             const SizedBox(width: 8),
             Flexible(
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Jupiter Arena Admin',
+                  '$displayName Admin',
                   style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 18),
                 ),
               ),
@@ -115,7 +164,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           child: IndexedStack(
             index: _selectedIndex,
             children: [
-              _visitedTabs.contains(0) ? _OverviewTab(isActive: _selectedIndex == 0) : const SizedBox.shrink(),
+              _visitedTabs.contains(0) ? _OverviewTab(isActive: _selectedIndex == 0, onReturnFromGymSettings: _loadGymProfile) : const SizedBox.shrink(),
               _visitedTabs.contains(1)
                   ? _MembersTab(
                       refreshKey: _membersRefreshKey,
@@ -230,7 +279,8 @@ class _BillingTab extends StatelessWidget {
 
 class _OverviewTab extends StatefulWidget {
   final bool isActive;
-  const _OverviewTab({this.isActive = false});
+  final VoidCallback? onReturnFromGymSettings;
+  const _OverviewTab({this.isActive = false, this.onReturnFromGymSettings});
 
   @override
   State<_OverviewTab> createState() => _OverviewTabState();
@@ -471,6 +521,12 @@ class _OverviewTabState extends State<_OverviewTab> {
               icon: _sendingReminders ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(FontAwesomeIcons.whatsapp),
               label: Text(_sendingReminders ? 'Sending...' : 'Send Payment Reminders'),
               style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: AppTheme.onPrimary),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GymSettingsScreen())).then((_) => widget.onReturnFromGymSettings?.call()),
+              icon: const Icon(Icons.settings),
+              label: const Text('Gym settings (name, logo, invoice name)'),
             ),
           ],
         ),

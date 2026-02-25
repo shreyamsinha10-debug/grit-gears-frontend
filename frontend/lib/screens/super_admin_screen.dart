@@ -77,6 +77,7 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
     final password = TextEditingController();
     final obscure = ValueNotifier(true);
     final loading = ValueNotifier(false);
+    final loginMaxLength = ValueNotifier(10); // 10 for phone, 50 for email
 
     await showDialog(
       context: context,
@@ -84,7 +85,9 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
         valueListenable: loading,
         builder: (_, loadingVal, __) => ValueListenableBuilder<bool>(
           valueListenable: obscure,
-          builder: (_, obs, __) => AlertDialog(
+          builder: (_, obs, __) => ValueListenableBuilder<int>(
+            valueListenable: loginMaxLength,
+            builder: (_, maxLen, __) => AlertDialog(
             title: Text('Create gym admin', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
             content: SingleChildScrollView(
               child: Column(
@@ -103,8 +106,31 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
                   const SizedBox(height: 4),
                   TextField(
                     controller: loginId,
-                    decoration: const InputDecoration(hintText: 'e.g. admin@gym.com'),
+                    maxLength: maxLen,
                     keyboardType: TextInputType.emailAddress,
+                    decoration: const InputDecoration(
+                      hintText: 'e.g. 8447594017 or admin@gym.com',
+                      counterText: '',
+                    ),
+                    onChanged: (String text) {
+                      final hasAt = text.contains('@');
+                      final hasLetter = RegExp(r'[a-zA-Z]').hasMatch(text);
+                      if (hasAt || hasLetter) {
+                        if (loginMaxLength.value != 50) loginMaxLength.value = 50;
+                        if (text.length > 50) {
+                          loginId.text = text.substring(0, 50);
+                          loginId.selection = TextSelection.collapsed(offset: 50);
+                        }
+                      } else {
+                        if (loginMaxLength.value != 10) loginMaxLength.value = 10;
+                        final digits = text.replaceAll(RegExp(r'[^0-9]'), '');
+                        if (digits.length > 10 || text != digits) {
+                          final truncated = digits.length > 10 ? digits.substring(0, 10) : digits;
+                          loginId.text = truncated;
+                          loginId.selection = TextSelection.collapsed(offset: truncated.length);
+                        }
+                      }
+                    },
                   ),
                   const SizedBox(height: 16),
                   Text('Password', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500)),
@@ -168,13 +194,32 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
                             Navigator.of(ctx).pop();
                             _loadAdmins();
                             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Admin created')));
-                          } else {
-                            loading.value = false;
-                            ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Failed to create admin')));
-                          }
-                        } catch (_) {
+                            } else {
+                              loading.value = false;
+                              String msg = 'Failed to create admin';
+                              if (r.body.isNotEmpty) {
+                                try {
+                                  final err = jsonDecode(r.body) as Map<String, dynamic>?;
+                                  final detail = err?['detail'];
+                                  if (detail != null) {
+                                    if (detail is String) {
+                                      msg = detail;
+                                    } else if (detail is List && detail.isNotEmpty) {
+                                      final first = detail.first;
+                                      msg = first is Map ? (first['msg'] ?? first.toString()) : first.toString();
+                                    } else {
+                                      msg = detail.toString();
+                                    }
+                                  }
+                                } catch (_) {}
+                              }
+                              if (msg == 'Failed to create admin') msg = 'Failed to create admin (${r.statusCode})';
+                              ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text(msg)));
+                            }
+                        } catch (e) {
                           loading.value = false;
-                          ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Request failed')));
+                          final msg = e.toString().split('\n').first.replaceFirst('Exception: ', '');
+                          ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('Request failed: $msg')));
                         }
                       },
                 child: loadingVal
@@ -184,6 +229,7 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
             ],
           ),
         ),
+      ),
       ),
     );
   }
@@ -213,9 +259,121 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
     }
   }
 
+  Future<void> _resetPassword(String adminId, String loginId) async {
+    final newPassword = TextEditingController();
+    final confirmPassword = TextEditingController();
+    final obscure = ValueNotifier(true);
+    final loading = ValueNotifier(false);
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => ValueListenableBuilder<bool>(
+        valueListenable: loading,
+        builder: (_, loadingVal, __) => ValueListenableBuilder<bool>(
+          valueListenable: obscure,
+          builder: (_, obs, __) => AlertDialog(
+            title: Text('Reset password', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Set a new password for $loginId. Existing password cannot be viewed (stored securely).',
+                    style: GoogleFonts.poppins(fontSize: 13, color: Theme.of(ctx).colorScheme.onSurface.withOpacity(0.8)),
+                  ),
+                  const SizedBox(height: 16),
+                  Text('New password', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: newPassword,
+                    obscureText: obs,
+                    decoration: InputDecoration(
+                      hintText: 'Min 6 characters',
+                      suffixIcon: IconButton(
+                        icon: Icon(obs ? Icons.visibility_off : Icons.visibility),
+                        onPressed: () => obscure.value = !obscure.value,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Confirm password', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: confirmPassword,
+                    obscureText: true,
+                    decoration: const InputDecoration(hintText: 'Re-enter new password'),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: loadingVal ? null : () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: loadingVal
+                    ? null
+                    : () async {
+                        final p = newPassword.text;
+                        final c = confirmPassword.text;
+                        if (p.length < 6) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Password must be at least 6 characters')));
+                          return;
+                        }
+                        if (p != c) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Passwords do not match')));
+                          return;
+                        }
+                        loading.value = true;
+                        final token = await _getToken();
+                        if (token == null) {
+                          loading.value = false;
+                          ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Not signed in')));
+                          return;
+                        }
+                        try {
+                          final r = await ApiClient.instance.patch(
+                            '/super-admin/admins/$adminId/password',
+                            headers: {
+                              'Content-Type': 'application/json',
+                              'Authorization': 'Bearer $token',
+                            },
+                            body: jsonEncode({'new_password': p}),
+                          );
+                          if (r.statusCode >= 200 && r.statusCode < 300 && ctx.mounted) {
+                            Navigator.of(ctx).pop();
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Password reset successfully')));
+                          } else {
+                            loading.value = false;
+                            String msg = 'Failed to reset password';
+                            if (r.body.isNotEmpty) {
+                              try {
+                                final err = jsonDecode(r.body) as Map<String, dynamic>?;
+                                final detail = err?['detail'];
+                                if (detail is String) msg = detail;
+                              } catch (_) {}
+                            }
+                            ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text(msg)));
+                          }
+                        } catch (e) {
+                          loading.value = false;
+                          ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('Request failed: ${e.toString().split('\n').first}')));
+                        }
+                      },
+                child: loadingVal
+                    ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Reset password'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _logout() async {
     await SecureStorage.setAuthToken(null);
     await SecureStorage.setAuthRole(null);
+    ApiClient.setAuthToken(null);
     if (!mounted) return;
     Navigator.pushReplacement(
       context,
@@ -316,6 +474,11 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.end,
                                 children: [
+                                  TextButton.icon(
+                                    onPressed: () => _resetPassword(id, loginId),
+                                    icon: const Icon(Icons.lock_reset, size: 18),
+                                    label: const Text('Reset password'),
+                                  ),
                                   if (isActive)
                                     TextButton(
                                       onPressed: () => _setActive(id, false),

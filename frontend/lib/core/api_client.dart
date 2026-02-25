@@ -26,6 +26,27 @@ class ApiClient {
   static const String _defaultBaseUrl = 'http://localhost:8000';
   static const String _prefsKey = 'api_base_url';
 
+  /// Optional Bearer token for gym_admin / super_admin. When set, all get/post/patch/delete add Authorization header.
+  static String? _authToken;
+  static String? get authToken => _authToken;
+  static set authToken(String? value) {
+    _authToken = value;
+  }
+
+  /// Call after login with gym_admin or super_admin token; call with null on logout.
+  static void setAuthToken(String? token) {
+    _authToken = token;
+  }
+
+  /// Merge optional Authorization header for authenticated requests.
+  static Map<String, String> _authHeaders(Map<String, String>? existing) {
+    final m = Map<String, String>.from(existing ?? {});
+    if (_authToken != null && _authToken!.isNotEmpty) {
+      m['Authorization'] = 'Bearer $_authToken';
+    }
+    return m;
+  }
+
   /// Runtime override (e.g. from SharedPreferences). Set via [loadSavedBaseUrl] or user "Set server URL".
   static String? _overrideBaseUrl;
 
@@ -203,7 +224,7 @@ class ApiClient {
 
     try {
       final response = await _clientOrCreate
-          .get(uri, headers: headers)
+          .get(uri, headers: _authHeaders(headers))
           .timeout(receiveTimeout);
 
       if (useCache && headers == null && response.statusCode >= 200 && response.statusCode < 300) {
@@ -216,7 +237,7 @@ class ApiClient {
       return response;
     } catch (e) {
       if (_isHttps && _isLookupError(e)) {
-        final fallback = await _requestViaIp(method: 'GET', path: path, queryParameters: queryParameters, headers: headers);
+        final fallback = await _requestViaIp(method: 'GET', path: path, queryParameters: queryParameters, headers: _authHeaders(headers));
         if (useCache && headers == null && fallback.statusCode >= 200 && fallback.statusCode < 300) {
           _getCache[key] = _CacheEntry(
             body: fallback.body,
@@ -238,13 +259,13 @@ class ApiClient {
   }) async {
     try {
       final response = await _clientOrCreate
-          .post(Uri.parse(baseUrl + path), headers: headers, body: body, encoding: encoding)
+          .post(Uri.parse(baseUrl + path), headers: _authHeaders(headers), body: body, encoding: encoding)
           .timeout(receiveTimeout);
       _clearCache();
       return response;
     } catch (e) {
       if (_isHttps && _isLookupError(e)) {
-        final r = await _requestViaIp(method: 'POST', path: path, headers: headers, body: body, encoding: encoding);
+        final r = await _requestViaIp(method: 'POST', path: path, headers: _authHeaders(headers), body: body, encoding: encoding);
         _clearCache();
         return r;
       }
@@ -260,13 +281,13 @@ class ApiClient {
   }) async {
     try {
       final response = await _clientOrCreate
-          .patch(Uri.parse(baseUrl + path), headers: headers, body: body, encoding: encoding)
+          .patch(Uri.parse(baseUrl + path), headers: _authHeaders(headers), body: body, encoding: encoding)
           .timeout(receiveTimeout);
       _clearCache();
       return response;
     } catch (e) {
       if (_isHttps && _isLookupError(e)) {
-        final r = await _requestViaIp(method: 'PATCH', path: path, headers: headers, body: body, encoding: encoding);
+        final r = await _requestViaIp(method: 'PATCH', path: path, headers: _authHeaders(headers), body: body, encoding: encoding);
         _clearCache();
         return r;
       }
@@ -274,16 +295,16 @@ class ApiClient {
     }
   }
 
-  Future<http.Response> delete(String path) async {
+  Future<http.Response> delete(String path, {Map<String, String>? headers}) async {
     try {
       final response = await _clientOrCreate
-          .delete(Uri.parse(baseUrl + path))
+          .delete(Uri.parse(baseUrl + path), headers: _authHeaders(headers))
           .timeout(receiveTimeout);
       _clearCache();
       return response;
     } catch (e) {
       if (_isHttps && _isLookupError(e)) {
-        final r = await _requestViaIp(method: 'DELETE', path: path);
+        final r = await _requestViaIp(method: 'DELETE', path: path, headers: _authHeaders(null));
         _clearCache();
         return r;
       }

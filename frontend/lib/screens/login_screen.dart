@@ -202,6 +202,7 @@ class _LoginScreenState extends State<LoginScreen> {
         if (role == 'super_admin' && token != null && token.isNotEmpty) {
           await SecureStorage.setAuthToken(token);
           await SecureStorage.setAuthRole('super_admin');
+          ApiClient.setAuthToken(token);
           if (!mounted) return;
           setState(() => _loading = false);
           Navigator.pushReplacement(
@@ -214,6 +215,7 @@ class _LoginScreenState extends State<LoginScreen> {
           await SecureStorage.setAuthToken(token);
           await SecureStorage.setAuthRole('gym_admin');
           await SecureStorage.setAdminPhone(loginId);
+          ApiClient.setAuthToken(token);
           if (!mounted) return;
           setState(() => _loading = false);
           Navigator.pushReplacement(
@@ -224,9 +226,23 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
 
-      // 1) Default admin: 9999999999 / 999999
+      // 1) Default admin: 9999999999 / 999999 – use auth API to get token (with gym_id) so dashboard calls are scoped
       if (phone == _defaultAdminPhone && password == _defaultAdminOtp) {
-        await SecureStorage.setAdminPhone(_defaultAdminPhone);
+        final authRes = await ApiClient.instance.post(
+          '/auth/login',
+          body: jsonEncode({'login_id': _defaultAdminPhone, 'password': password}),
+          headers: {'Content-Type': 'application/json'},
+        );
+        if (authRes.statusCode >= 200 && authRes.statusCode < 300) {
+          final authData = jsonDecode(authRes.body) as Map<String, dynamic>?;
+          final tok = authData?['token'] as String?;
+          if (tok != null && tok.isNotEmpty) {
+            await SecureStorage.setAuthToken(tok);
+            await SecureStorage.setAuthRole('gym_admin');
+            await SecureStorage.setAdminPhone(_defaultAdminPhone);
+            ApiClient.setAuthToken(tok);
+          }
+        }
         if (!mounted) return;
         setState(() => _loading = false);
         Navigator.pushReplacement(
@@ -335,7 +351,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
                     child: Image.asset(
-                      'assets/logo.png',
+                      defaultLogoAsset,
                       height: 56,
                       width: 56,
                       fit: BoxFit.contain,
@@ -353,7 +369,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        'Jupiter Arena',
+                        defaultGymName,
                         style: GoogleFonts.poppins(
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
