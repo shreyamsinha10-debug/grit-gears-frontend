@@ -592,11 +592,6 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
               const PopupMenuItem(value: 'delete', child: Text('Delete Member', style: TextStyle(color: Colors.red))),
             ],
           ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            tooltip: 'Logout',
-            onPressed: () => LoginScreen.logout(context),
-          ),
         ],
       ),
       body: Column(
