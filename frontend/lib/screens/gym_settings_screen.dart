@@ -924,12 +924,6 @@ class _GymSettingsScreenState extends State<GymSettingsScreen> {
                 ),
               ],
             ),
-          const SizedBox(height: 32),
-          FilledButton(
-            onPressed: _saving ? null : _save,
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: AppTheme.onPrimary, padding: const EdgeInsets.symmetric(vertical: 14)),
-            child: Text(_saving ? 'Saving...' : 'Save changes', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-          ),
           const SizedBox(height: 28),
           Text('Address Information', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
           const SizedBox(height: 12),
@@ -1163,6 +1157,13 @@ class _GymSettingsScreenState extends State<GymSettingsScreen> {
                 ),
               );
             }),
+          const SizedBox(height: 32),
+          FilledButton(
+            onPressed: _saving ? null : _save,
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: AppTheme.onPrimary, padding: const EdgeInsets.symmetric(vertical: 16)),
+            child: Text(_saving ? 'Saving...' : 'Save changes', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15)),
+          ),
+          const SizedBox(height: 32),
         ],
       ),
     );
