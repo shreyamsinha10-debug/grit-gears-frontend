@@ -848,7 +848,7 @@ class _FeesTabState extends State<_FeesTab> {
                     children: [
                   _FeeChip('Paid', paid['count'] ?? 0, paid['total_amount'] ?? 0, AppTheme.success, isSelected: _statusFilter == 'Paid', onTap: () => setState(() => _statusFilter = _statusFilter == 'Paid' ? null : 'Paid')),
                   _FeeChip('Due in 7 days', due['count'] ?? 0, due['total_amount'] ?? 0, AppTheme.primary, isSelected: _statusFilter == 'Due', onTap: () => setState(() => _statusFilter = _statusFilter == 'Due' ? null : 'Due')),
-                  _FeeChip('Overdue - Need payment today', overdue['count'] ?? 0, overdue['total_amount'] ?? 0, Colors.orange, isSelected: _statusFilter == 'Overdue', onTap: () => setState(() => _statusFilter = _statusFilter == 'Overdue' ? null : 'Overdue')),
+                  _FeeChip('Overdue - Need Immediate Payment', overdue['count'] ?? 0, overdue['total_amount'] ?? 0, Colors.orange, isSelected: _statusFilter == 'Overdue', onTap: () => setState(() => _statusFilter = _statusFilter == 'Overdue' ? null : 'Overdue')),
                     ],
                   )
                 : Row(
@@ -877,7 +877,7 @@ class _FeesTabState extends State<_FeesTab> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: _FeeChip(
-                          'Overdue - Need payment today',
+                          'Overdue - Need Immediate Payment',
                           overdue['count'] ?? 0,
                           overdue['total_amount'] ?? 0,
                           Colors.orange,
@@ -928,22 +928,12 @@ class _FeesTabState extends State<_FeesTab> {
                   contentPadding: EdgeInsets.symmetric(horizontal: LayoutConstants.screenPadding(context), vertical: 8),
                   title: Text(map['member_name'] ?? '', style: GoogleFonts.poppins(color: AppTheme.onSurface, fontWeight: FontWeight.w500)),
                   subtitle: Text('${map['fee_type']} • ${map['period'] ?? 'Registration'}', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
+                  trailing: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Text('₹${map['amount']}', style: GoogleFonts.poppins(color: AppTheme.primary, fontWeight: FontWeight.bold)),
-                          Text(map['status'] ?? '', style: TextStyle(color: _statusColor(map['status']), fontSize: 12)),
-                        ],
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.edit_outlined, size: 20),
-                        tooltip: 'Edit status',
-                        onPressed: () => _showEditPaymentStatus(context, map, _load),
-                      ),
+                      Text('₹${map['amount']}', style: GoogleFonts.poppins(color: AppTheme.primary, fontWeight: FontWeight.bold)),
+                      Text(map['status'] ?? '', style: TextStyle(color: _statusColor(map['status']), fontSize: 12)),
                     ],
                   ),
                 ),
