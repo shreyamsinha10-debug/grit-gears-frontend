@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
 // Login – unified entry: phone/email + password, routes to Admin or Member.
 // ---------------------------------------------------------------------------
-// Calls backend to validate; admin (default 9999999999/999999) goes to
-// Admin Dashboard, member (by phone) goes to Member Home. Handles server
-// URL config and theme toggle. See [LoginScreen].
+// Backend validates via POST /auth/login (super_admin, gym_admin, member).
+// Fallback: member by phone (GET /members/by-phone) when login returns 401.
+// Only existing accounts can sign in; no self-service gym creation.
 // ---------------------------------------------------------------------------
 
 import 'dart:convert';
@@ -20,15 +20,14 @@ import 'super_admin_screen.dart';
 
 /// Single login screen: Email or Mobile + Password. Routes to Admin or Member based on credentials.
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  /// Optional message to show (e.g. after portal access blocked for inactive member).
+  final String? initialMessage;
+
+  const LoginScreen({super.key, this.initialMessage});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
-
-/// Default admin: phone 9999999999, OTP/password 999999
-const String _defaultAdminPhone = '9999999999';
-const String _defaultAdminOtp = '999999';
 
 class _LoginScreenState extends State<LoginScreen> {
   final _emailOrPhoneController = TextEditingController();
@@ -37,6 +36,14 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _loading = false;
   String? _error;
   int _emailOrPhoneMaxLength = 10;  // 10 for phone, 50 for email
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialMessage != null && widget.initialMessage!.trim().isNotEmpty) {
+      _error = widget.initialMessage;
+    }
+  }
 
   @override
   void dispose() {
@@ -243,46 +250,14 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
 
-      // 1) Default admin: 9999999999 / 999999 – use auth API to get token (with gym_id) so dashboard calls are scoped
-      if (phone == _defaultAdminPhone && password == _defaultAdminOtp) {
-        final authRes = await ApiClient.instance.post(
-          '/auth/login',
-          body: jsonEncode({'login_id': _defaultAdminPhone, 'password': password}),
-          headers: {'Content-Type': 'application/json'},
-        );
-        if (authRes.statusCode >= 200 && authRes.statusCode < 300) {
-          final authData = jsonDecode(authRes.body) as Map<String, dynamic>?;
-          final tok = authData?['token'] as String?;
-          if (tok != null && tok.isNotEmpty) {
-            await SecureStorage.setAuthToken(tok);
-            await SecureStorage.setAuthRole('gym_admin');
-            await SecureStorage.setAdminPhone(_defaultAdminPhone);
-            ApiClient.setAuthToken(tok);
-          }
-        }
-        if (!mounted) return;
-        setState(() => _loading = false);
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
-        );
+      if (authRes.statusCode == 403) {
+        final body = jsonDecode(authRes.body) as Map<String, dynamic>?;
+        final detail = body?['detail']?.toString() ?? 'Access denied';
+        if (mounted) setState(() { _error = detail; _loading = false; });
         return;
       }
 
-      final savedAdmin = await SecureStorage.getAdminPhone();
-
-      // 1) If this credential matches saved admin → Admin dashboard
-      if (savedAdmin != null && (savedAdmin == phone || savedAdmin == emailOrPhone)) {
-        if (!mounted) return;
-        setState(() => _loading = false);
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
-        );
-        return;
-      }
-
-      // 2) Try member by phone (for both: existing member, or when no admin saved yet)
+      // Try member by phone (no password) for member lookup
       final r = await ApiClient.instance.get(
         '/members/by-phone/${Uri.encodeComponent(phone)}',
         useCache: false,
@@ -298,22 +273,6 @@ class _LoginScreenState extends State<LoginScreen> {
           context,
           MaterialPageRoute(builder: (_) => MemberHomeScreen(member: member)),
         );
-        return;
-      }
-
-      // 3) Not a member: if no admin saved yet, first login becomes admin (owner)
-      if (savedAdmin == null) {
-        await SecureStorage.setAdminPhone(phone);
-        if (mounted) {
-          setState(() => _loading = false);
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const AdminDashboardScreen()),
-          );
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Welcome. You have full admin access.')),
-          );
-        }
         return;
       }
 
@@ -537,11 +496,29 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               if (_error != null) ...[
-                Text(
-                  _error!,
-                  style: GoogleFonts.poppins(color: AppTheme.error, fontSize: 13),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.error.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(radius),
+                    border: Border.all(color: AppTheme.error.withOpacity(0.4)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.info_outline_rounded, size: 22, color: AppTheme.error),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _error!,
+                          style: GoogleFonts.poppins(color: AppTheme.error, fontSize: 14, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
               ],
               const SizedBox(height: 8),
               FilledButton(

@@ -20,16 +20,15 @@ This document describes how the app works from app open to each user role, so yo
 
 ### Backend auth (`POST /auth/login`)
 
-- **Super admin**: Fixed credentials (env `SUPER_ADMIN_LOGIN_ID` / `SUPER_ADMIN_PASSWORD`). Returns `role: "super_admin"`, JWT token.
+- **Super admin**: Credentials from env (`SUPER_ADMIN_LOGIN_ID` / `SUPER_ADMIN_PASSWORD`). Returns `role: "super_admin"`, JWT token. Only this role can create gym admins.
 - **Gym admin**: Lookup in `gym_admins` by `login_id`; password verified with bcrypt. Returns `role: "gym_admin"`, JWT with `gym_id`. If admin is inactive, returns 403.
 - **Member**: `login_id` treated as phone; lookup in `gym_members` by `phone`; password verified. Member must be Active and have `gym_id`. Returns `role: "member"`, JWT, and **member** object (including `today_status`: checked_in / checked_out for today).
 
-### Fallbacks (when auth API does not return a role)
+### Fallbacks when `/auth/login` returns 401
 
-- **Default admin**: Phone `9999999999` + password `999999` → app still calls `/auth/login`; if that returns a token, it's stored and user goes to Admin Dashboard.
-- **Saved admin phone**: If the credential matches the last-used admin phone (from SecureStorage), user is sent to Admin Dashboard (no backend token in this path; used for legacy flow).
-- **Member by phone**: `GET /members/by-phone/{phone}` (no password). If a member exists, user is sent to Member Home with that member payload.
-- **First-time owner**: If no admin phone is saved and the credential is not a member, app saves the phone as admin and opens Admin Dashboard (with a "Welcome, you have full admin access" message).
+- **Member by phone**: `GET /members/by-phone/{phone}` (no password). If a member exists, user is sent to Member Home.
+
+If the user is not super_admin, not gym_admin, and not a member, they **cannot log in**. All gym admins are created by the super admin via `POST /super-admin/admins`; there is no self-service gym or admin creation.
 
 ### Where each role goes after login
 
@@ -113,9 +112,50 @@ This document describes how the app works from app open to each user role, so yo
 
 | Flow | Steps |
 |------|--------|
-| **Admin opens app** | Landing → Sign In → Login (admin credentials) → Admin Dashboard → Overview / Members / Fees / Billing. Can register member, check-in/out for member, log fees, issue invoices, export Excel, open Heatmap and Attendance report. |
-| **Member opens app** | Landing → Sign In → Login (phone + password, or phone-only member lookup) → Member Home → Check-in/out, view dues, pay (simulated), view attendance stats, update photo/ID, view PT schedule/diet if PT. |
-| **Super admin** | Login with super_admin credentials → Super Admin screen → Manage gym admins (create, edit, set password). |
+| **Admin opens app** | Landing → Sign In → Login (gym_admin credentials created by super admin) → Admin Dashboard → Overview / Members / Fees / Billing. All requests use Bearer token. |
+| **Member opens app** | Landing → Sign In → Login (phone + password via /auth/login, or member-by-phone fallback) → Member Home → Check-in/out, dues, pay, attendance, photo/ID, PT schedule if applicable. |
+| **Super admin** | Login with env-configured super_admin credentials → Super Admin screen → Create gym admins (gym name, login_id, password), list/patch/reset password. |
 | **Data flow** | Flutter uses `ApiClient` (base URL from env/default or SharedPreferences). All authenticated requests send `Authorization: Bearer <token>`. Backend uses JWT to resolve gym_id or member_id and applies filters. |
 
 Use this as the single source of truth for "how does X work?" and "where is Y handled?" (e.g. login routing, check-in rules, heatmap, exports, session timeout, roles).
+
+---
+
+## 7. Deployment (Railway / VPS) – modular workflow
+
+The backend is designed to run on Railway, a VPS, or any host. There is **no hardcoded default admin**; the same behaviour applies in production.
+
+### Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `MONGODB_URL` | MongoDB connection string |
+| `DATABASE_NAME` | Database name (e.g. `gym_db`) |
+| `SUPER_ADMIN_LOGIN_ID` | Super admin login (e.g. email or phone) |
+| `SUPER_ADMIN_PASSWORD` | Super admin password |
+| `JWT_SECRET` | Secret for signing JWTs (use a strong value in production) |
+
+### How to create the super admin on VPS (or Railway)
+
+The super admin is **not** stored in the database. It is defined only by environment variables. There is no “create super admin” step in the app.
+
+**On first deploy (VPS / Railway / any host):**
+
+1. Set these environment variables for the backend process:
+   - `SUPER_ADMIN_LOGIN_ID` – the value you will use to sign in (e.g. `admin@gymsaas.com` or a phone number).
+   - `SUPER_ADMIN_PASSWORD` – the password for that account. Use a strong password in production.
+2. Start (or restart) the backend. No DB migration or script is needed.
+3. Open the app, go to Sign In, and log in with that **login id** and **password**. You will be taken to the Super Admin screen, where you can create gym admins.
+
+To change the super admin later, change `SUPER_ADMIN_LOGIN_ID` and/or `SUPER_ADMIN_PASSWORD` in the environment and restart the backend. There is only one super admin per deployment (the one defined by env).
+
+### Bootstrap workflow (scalable)
+
+1. **Super admin only** exists at first (env credentials). Log in via the app with these credentials → Super Admin screen.
+2. **Create gym admins**: Super admin uses "Create admin" (or `POST /super-admin/admins`) with gym name, admin login_id (e.g. phone), and password. Each gym admin gets their own gym and can log in with that login_id + password.
+3. **Gym admins create members**: From Admin Dashboard → Register member. Set member password via Member detail → Reset password (`PATCH /members/{id}/password`). Members log in with phone + password via `POST /auth/login`.
+4. **No self-service**: If someone is not super_admin, gym_admin, or member, they cannot log in. Do not use owner-claim to create new gyms from the app.
+
+### No "Failed to load" in production
+
+- Every path to Admin Dashboard uses a JWT from `POST /auth/login` (gym_admin). Only accounts created by the super admin can log in as gym_admin. Set the deployed backend URL in the app (or use default production URL).

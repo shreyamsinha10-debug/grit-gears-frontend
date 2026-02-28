@@ -1,14 +1,10 @@
 // ---------------------------------------------------------------------------
-// Billing – walk-in (new member + first invoice), invoice list, mark paid, export.
-// ---------------------------------------------------------------------------
-// Tabs: Issue (walk-in), History (invoices), Export. Uses [export_helper] to
-// download Excel. All amounts in ₹; dates via [date_utils].
+// Billing – Create Bill (member + plans + payment) and Invoice History.
 // ---------------------------------------------------------------------------
 
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../core/api_client.dart';
@@ -26,16 +22,13 @@ class BillingScreen extends StatefulWidget {
 
 class _BillingScreenState extends State<BillingScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  List<Map<String, dynamic>> _members = [];
   List<Map<String, dynamic>> _invoices = [];
-  bool _loadingMembers = false;
   bool _loadingInvoices = false;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-    _loadMembers();
+    _tabController = TabController(length: 2, vsync: this);
     _loadInvoices();
   }
 
@@ -43,22 +36,6 @@ class _BillingScreenState extends State<BillingScreen> with SingleTickerProvider
   void dispose() {
     _tabController.dispose();
     super.dispose();
-  }
-
-  Future<void> _loadMembers() async {
-    setState(() => _loadingMembers = true);
-    try {
-      final r = await ApiClient.instance.get('/members', queryParameters: {'brief': 'true', 'limit': '500'}, useCache: true);
-      if (mounted && r.statusCode == 200) {
-        final list = jsonDecode(r.body) as List<dynamic>;
-        setState(() {
-          _members = list.map((e) => e as Map<String, dynamic>).toList();
-          _loadingMembers = false;
-        });
-      } else if (mounted) setState(() => _loadingMembers = false);
-    } catch (_) {
-      if (mounted) setState(() => _loadingMembers = false);
-    }
   }
 
   Future<void> _loadInvoices({String? search, String? dateFrom, String? dateTo}) async {
@@ -90,19 +67,27 @@ class _BillingScreenState extends State<BillingScreen> with SingleTickerProvider
           labelColor: AppTheme.primary,
           unselectedLabelColor: Colors.grey,
           tabs: const [
-            Tab(text: 'Walk-in'),
-            Tab(text: 'Existing Member'),
+            Tab(text: 'Create Bill'),
             Tab(text: 'Invoice / History'),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         Expanded(
           child: TabBarView(
             controller: _tabController,
             children: [
-              _WalkInTab(onSuccess: () { _loadMembers(); _loadInvoices(); }),
-              _ExistingMemberTab(members: _members, loading: _loadingMembers, onSuccess: () { _loadMembers(); _loadInvoices(); }),
-              _InvoiceHistoryTab(invoices: _invoices, loading: _loadingInvoices, onRefresh: _loadInvoices, loadInvoices: _loadInvoices),
+              _CreateBillTab(
+                onBillCreated: () {
+                  _loadInvoices();
+                  _tabController.animateTo(1);
+                },
+              ),
+              _InvoiceHistoryTab(
+                invoices: _invoices,
+                loading: _loadingInvoices,
+                onRefresh: _loadInvoices,
+                loadInvoices: _loadInvoices,
+              ),
             ],
           ),
         ),
@@ -111,66 +96,179 @@ class _BillingScreenState extends State<BillingScreen> with SingleTickerProvider
   }
 }
 
-class _WalkInTab extends StatefulWidget {
-  final VoidCallback onSuccess;
-
-  const _WalkInTab({required this.onSuccess});
-
-  @override
-  State<_WalkInTab> createState() => _WalkInTabState();
+/// Line item for the bill (from plan or custom).
+class _BillLineItem {
+  final String description;
+  final int amount;
+  _BillLineItem({required this.description, required this.amount});
 }
 
-class _WalkInTabState extends State<_WalkInTab> {
-  final _name = TextEditingController();
-  final _phone = TextEditingController();
-  final _email = TextEditingController();
-  String _membershipType = 'Regular';
-  String _batch = 'Morning';
-  bool _loading = false;
+class _CreateBillTab extends StatefulWidget {
+  final VoidCallback onBillCreated;
+
+  const _CreateBillTab({required this.onBillCreated});
+
+  @override
+  State<_CreateBillTab> createState() => _CreateBillTabState();
+}
+
+class _CreateBillTabState extends State<_CreateBillTab> {
+  List<Map<String, dynamic>> _members = [];
+  List<Map<String, dynamic>> _plans = [];
+  bool _loadingMembers = true;
+  bool _loadingPlans = true;
+  final _memberSearchController = TextEditingController();
+  Map<String, dynamic>? _selectedMember;
+  final List<_BillLineItem> _lineItems = [];
+  final _amountController = TextEditingController(text: '0');
+  String _paymentMethod = 'Cash';
+  DateTime _paymentDate = DateTime.now();
+  final _referenceController = TextEditingController();
+  final _notesController = TextEditingController();
+  bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMembers();
+    _loadPlans();
+  }
 
   @override
   void dispose() {
-    _name.dispose();
-    _phone.dispose();
-    _email.dispose();
+    _memberSearchController.dispose();
+    _amountController.dispose();
+    _referenceController.dispose();
+    _notesController.dispose();
     super.dispose();
   }
 
-  Future<void> _submit() async {
-    if (_name.text.trim().isEmpty || _phone.text.trim().isEmpty || _email.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Fill all fields')));
+  Future<void> _loadMembers() async {
+    setState(() => _loadingMembers = true);
+    try {
+      final r = await ApiClient.instance.get('/members', queryParameters: {'brief': 'true', 'limit': '500'}, useCache: true);
+      if (mounted && r.statusCode == 200) {
+        final list = jsonDecode(r.body) as List<dynamic>;
+        setState(() {
+          _members = list.map((e) => e as Map<String, dynamic>).toList();
+          _loadingMembers = false;
+        });
+      } else if (mounted) setState(() => _loadingMembers = false);
+    } catch (_) {
+      if (mounted) setState(() => _loadingMembers = false);
+    }
+  }
+
+  Future<void> _loadPlans() async {
+    setState(() => _loadingPlans = true);
+    try {
+      final r = await ApiClient.instance.get('/gym/profile', useCache: true);
+      if (mounted && r.statusCode == 200) {
+        final body = jsonDecode(r.body) as Map<String, dynamic>;
+        final plans = body['plans'] as List<dynamic>? ?? [];
+        setState(() {
+          _plans = plans.map((e) => e as Map<String, dynamic>).where((p) => p['is_active'] != false).toList();
+          _loadingPlans = false;
+        });
+      } else if (mounted) setState(() => _loadingPlans = false);
+    } catch (_) {
+      if (mounted) setState(() => _loadingPlans = false);
+    }
+  }
+
+  List<Map<String, dynamic>> get _filteredMembers {
+    final q = _memberSearchController.text.trim().toLowerCase();
+    if (q.isEmpty) return _members;
+    return _members.where((m) {
+      final name = (m['name'] as String? ?? '').toLowerCase();
+      final phone = (m['phone'] as String? ?? '').replaceAll(RegExp(r'\D'), '');
+      final searchDigits = q.replaceAll(RegExp(r'\D'), '');
+      return name.contains(q) || (searchDigits.isNotEmpty && phone.contains(searchDigits));
+    }).toList();
+  }
+
+  int get _totalAmount {
+    int sum = 0;
+    for (final item in _lineItems) sum += item.amount;
+    return sum;
+  }
+
+  void _updateAmountFromItems() {
+    _amountController.text = _totalAmount.toString();
+  }
+
+  void _addPlanAsLineItem(Map<String, dynamic> plan) {
+    final name = plan['name'] as String? ?? 'Plan';
+    final price = int.tryParse(plan['price']?.toString() ?? '0') ?? 0;
+    if (price <= 0) return;
+    setState(() {
+      _lineItems.add(_BillLineItem(description: name, amount: price));
+      _updateAmountFromItems();
+    });
+  }
+
+  void _removeLineItem(int index) {
+    setState(() {
+      _lineItems.removeAt(index);
+      _updateAmountFromItems();
+    });
+  }
+
+  Future<void> _submitBill() async {
+    if (_selectedMember == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select a member')));
       return;
     }
-    setState(() => _loading = true);
+    if (_lineItems.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Add at least one plan or line item')));
+      return;
+    }
+    final total = int.tryParse(_amountController.text.trim()) ?? 0;
+    if (total <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a valid amount')));
+      return;
+    }
+    setState(() => _submitting = true);
     try {
+      final body = jsonEncode({
+        'member_id': _selectedMember!['id'],
+        'items': _lineItems.map((e) => {'description': e.description, 'amount': e.amount}).toList(),
+        'total': total,
+        'payment_method': _paymentMethod,
+        'payment_date': formatApiDate(_paymentDate),
+        'reference': _referenceController.text.trim().isEmpty ? null : _referenceController.text.trim(),
+        'notes': _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
+      });
       final r = await ApiClient.instance.post(
-        '/billing/issue',
+        '/billing/create',
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'name': _name.text.trim(),
-          'phone': _phone.text.trim(),
-          'email': _email.text.trim(),
-          'membership_type': _membershipType,
-          'batch': _batch,
-        }),
+        body: body,
       );
       if (!mounted) return;
       if (r.statusCode >= 200 && r.statusCode < 300) {
         ApiClient.instance.invalidateCache();
         final inv = jsonDecode(r.body) as Map<String, dynamic>;
-        widget.onSuccess();
-        _name.clear();
-        _phone.clear();
-        _email.clear();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Member added. Invoice #${inv['id']} issued for ₹${inv['total']}')));
+        final billNo = inv['bill_number'] as String? ?? inv['id']?.toString().substring(0, 8) ?? '';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Bill $billNo created for ₹$total')));
+        widget.onBillCreated();
+        setState(() {
+          _submitting = false;
+          _selectedMember = null;
+          _lineItems.clear();
+          _amountController.text = '0';
+          _referenceController.clear();
+          _notesController.clear();
+        });
       } else {
-        final body = jsonDecode(r.body);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(body['detail']?.toString() ?? 'Failed')));
+        final detail = (jsonDecode(r.body) as Map<String, dynamic>)['detail'] ?? r.body;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $detail')));
+        setState(() => _submitting = false);
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
-    } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+        setState(() => _submitting = false);
+      }
     }
   }
 
@@ -182,16 +280,96 @@ class _WalkInTabState extends State<_WalkInTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            'Walk-in (new member)',
-            style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600, color: AppTheme.onSurface),
+          Text('Create Bill', style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
+          const SizedBox(height: 2),
+          Text('Bill No: —', style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade600)),
+          const SizedBox(height: 20),
+          // Select Member
+          Text('Select Member', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _memberSearchController,
+            decoration: const InputDecoration(
+              hintText: 'Search by name or phone...',
+              prefixIcon: Icon(Icons.search),
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            onChanged: (_) => setState(() {}),
           ),
+          if (_selectedMember != null) ...[
+            const SizedBox(height: 8),
+            Card(
+              color: AppTheme.surfaceVariant,
+              child: ListTile(
+                title: Text(_selectedMember!['name'] ?? ''),
+                subtitle: Text(_selectedMember!['phone'] ?? ''),
+                trailing: IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => setState(() => _selectedMember = null),
+                ),
+              ),
+            ),
+          ] else if (_filteredMembers.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 200),
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _filteredMembers.length,
+                itemBuilder: (context, i) {
+                  final m = _filteredMembers[i];
+                  return ListTile(
+                    title: Text(m['name'] ?? ''),
+                    subtitle: Text(m['phone'] ?? ''),
+                    onTap: () => setState(() {
+                      _selectedMember = m;
+                      _memberSearchController.clear();
+                    }),
+                  );
+                },
+              ),
+            ),
+          ] else if (!_loadingMembers)
+            Padding(padding: const EdgeInsets.all(8), child: Text('No members found', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600))),
+          const SizedBox(height: 20),
+          // Membership Plans
+          Text('Membership Plans', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500)),
           const SizedBox(height: 4),
-          Text(
-            'Add a new member who has come for the first time and issue their first bill (registration + first month).',
-            style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade600),
-          ),
-          const SizedBox(height: 24),
+          Text('Add one or more plans (e.g. Registration + Monthly)', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
+          const SizedBox(height: 8),
+          if (_loadingPlans)
+            const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator(color: AppTheme.primary)))
+          else if (_plans.isEmpty)
+            Padding(padding: const EdgeInsets.all(8), child: Text('No plans in gym settings', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)))
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _plans.map((p) {
+                final name = p['name'] as String? ?? '';
+                final price = int.tryParse(p['price']?.toString() ?? '0') ?? 0;
+                return FilterChip(
+                  label: Text('$name — ₹$price'),
+                  onSelected: (_) => _addPlanAsLineItem(p),
+                );
+              }).toList(),
+            ),
+          if (_lineItems.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            ..._lineItems.asMap().entries.map((e) => ListTile(
+              title: Text(e.value.description),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('₹${e.value.amount}', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                  IconButton(icon: const Icon(Icons.remove_circle_outline, size: 20), onPressed: () => _removeLineItem(e.key)),
+                ],
+              ),
+            )),
+          ],
+          const SizedBox(height: 20),
+          // Payment Details
           Card(
             color: AppTheme.surfaceVariant,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -200,314 +378,66 @@ class _WalkInTabState extends State<_WalkInTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  Text('Amount', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700)),
                   TextField(
-                    controller: _name,
-                    decoration: InputDecoration(
-                      labelText: 'Name',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      filled: true,
-                    ),
+                    controller: _amountController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(prefixText: '₹ ', border: OutlineInputBorder(), isDense: true),
+                    onChanged: (_) => setState(() {}),
                   ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _phone,
-                    keyboardType: TextInputType.phone,
-                    maxLength: 10,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: InputDecoration(
-                      labelText: 'Phone',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      filled: true,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _email,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: InputDecoration(
-                      labelText: 'Email',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      filled: true,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
+                  Text('Method', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700)),
                   DropdownButtonFormField<String>(
-                    value: _membershipType,
-                    decoration: InputDecoration(
-                      labelText: 'Membership',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      filled: true,
-                    ),
-                    items: ['Regular', 'PT'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-                    onChanged: (v) => setState(() => _membershipType = v ?? 'Regular'),
+                    value: _paymentMethod,
+                    decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+                    items: const [
+                      DropdownMenuItem(value: 'Cash', child: Text('Cash')),
+                      DropdownMenuItem(value: 'Online', child: Text('Online')),
+                    ],
+                    onChanged: (v) => setState(() => _paymentMethod = v ?? 'Cash'),
                   ),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    value: _batch,
-                    decoration: InputDecoration(
-                      labelText: 'Batch',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      filled: true,
-                    ),
-                    items: ['Morning', 'Evening', 'Ladies'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-                    onChanged: (v) => setState(() => _batch = v ?? 'Morning'),
+                  const SizedBox(height: 12),
+                  Text('Date', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700)),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(formatDisplayDate(_paymentDate)),
+                    trailing: const Icon(Icons.calendar_today),
+                    onTap: () async {
+                      final d = await showDatePicker(context: context, initialDate: _paymentDate, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365)));
+                      if (d != null) setState(() => _paymentDate = d);
+                    },
                   ),
+                  const SizedBox(height: 8),
+                  Text('Reference (optional)', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700)),
+                  TextField(
+                    controller: _referenceController,
+                    decoration: const InputDecoration(hintText: 'UPI ref, etc.', border: OutlineInputBorder(), isDense: true),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Total Paid: ₹${int.tryParse(_amountController.text.trim()) ?? 0}', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600)),
                 ],
               ),
             ),
           ),
+          const SizedBox(height: 16),
+          Text('Notes (Optional)', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700)),
+          TextField(
+            controller: _notesController,
+            maxLines: 2,
+            decoration: const InputDecoration(hintText: 'e.g. July Fees', border: OutlineInputBorder()),
+          ),
           const SizedBox(height: 24),
-          FilledButton(
-            onPressed: _loading ? null : _submit,
+          FilledButton.icon(
+            onPressed: _submitting ? null : _submitBill,
+            icon: _submitting ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.check),
+            label: Text('Complete Bill — ₹${int.tryParse(_amountController.text.trim()) ?? 0}.00'),
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.primary,
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
-            child: _loading
-                ? const SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : Text('Add Member & Issue First Bill', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _ExistingMemberTab extends StatefulWidget {
-  final List<Map<String, dynamic>> members;
-  final bool loading;
-  final VoidCallback onSuccess;
-
-  const _ExistingMemberTab({required this.members, required this.loading, required this.onSuccess});
-
-  @override
-  State<_ExistingMemberTab> createState() => _ExistingMemberTabState();
-}
-
-class _ExistingMemberTabState extends State<_ExistingMemberTab> {
-  final _searchController = TextEditingController();
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  List<Map<String, dynamic>> get _filteredMembers {
-    final q = _searchController.text.trim().toLowerCase();
-    if (q.isEmpty) return widget.members;
-    return widget.members.where((m) => (m['name'] as String? ?? '').toLowerCase().contains(q)).toList();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (widget.loading) return const Center(child: CircularProgressIndicator(color: AppTheme.primary));
-    if (widget.members.isEmpty) return const Center(child: Text('No members. Use Walk-in or Members tab.'));
-    return Column(
-      children: [
-        Padding(
-          padding: EdgeInsets.symmetric(horizontal: LayoutConstants.screenPadding(context)),
-          child: TextField(
-            controller: _searchController,
-            decoration: const InputDecoration(
-              hintText: 'Search by name…',
-              prefixIcon: Icon(Icons.search),
-              border: OutlineInputBorder(),
-              isDense: true,
-            ),
-            onChanged: (_) => setState(() {}),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Expanded(
-          child: ListView.builder(
-            padding: EdgeInsets.all(LayoutConstants.screenPadding(context)),
-            itemCount: _filteredMembers.length,
-            itemBuilder: (context, i) {
-              final m = _filteredMembers[i];
-              final name = m['name'] as String? ?? '';
-              final id = m['id'] as String? ?? '';
-              final type = (m['membership_type'] as String? ?? 'Regular').toLowerCase();
-              final amount = type == 'pt' ? 2000 : 500;
-              return Card(
-                margin: const EdgeInsets.only(bottom: 12),
-                child: ListTile(
-                  title: Text(name),
-                  subtitle: Text('$type • ₹$amount/month'),
-                  trailing: TextButton(
-                    onPressed: () => _showExistingMemberPayDialog(context, id, name, type, amount, widget.onSuccess),
-                    child: const Text('Log payment'),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  static void _showExistingMemberPayDialog(BuildContext context, String memberId, String name, String membershipType, int monthlyAmount, VoidCallback onSuccess) async {
-    List<Map<String, dynamic>> payments = [];
-    try {
-      final r = await ApiClient.instance.get('/payments', queryParameters: {'member_id': memberId}, useCache: false);
-      if (r.statusCode == 200) {
-        final list = jsonDecode(r.body) as List<dynamic>;
-        payments = list.cast<Map<String, dynamic>>();
-      }
-    } catch (_) {}
-    if (!context.mounted) return;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) {
-          final unpaid = payments.where((p) => p['status'] != 'Paid').toList();
-          final unpaidMonthly = unpaid.where((p) => (p['fee_type'] as String? ?? '') == 'monthly').toList();
-          final unpaidRegistration = unpaid.where((p) => (p['fee_type'] as String? ?? '') == 'registration').toList();
-
-          return Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text('Dues for $name', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                Text(
-                  'Existing members: only monthly charges (₹${membershipType == 'pt' ? '2000' : '500'}/month). Registration is one-time at signup.',
-                  style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600),
-                ),
-                const SizedBox(height: 16),
-                // Unpaid registration: show as info only (one-time, paid at signup — no Pay button)
-                ...unpaidRegistration.map((p) => ListTile(
-                  title: Text(
-                    'registration • ₹${p['amount']}',
-                    style: TextStyle(
-                      decoration: TextDecoration.lineThrough,
-                      color: Colors.grey.shade600,
-                      fontSize: 14,
-                    ),
-                  ),
-                  subtitle: const Text('One-time, paid at new member signup', style: TextStyle(fontSize: 12)),
-                  trailing: const SizedBox.shrink(),
-                )),
-                // Unpaid monthly: show with Pay button
-                ...unpaidMonthly.map((p) => ListTile(
-                  title: Text('${p['fee_type']} • ₹${p['amount']}'),
-                  trailing: FilledButton(
-                    onPressed: () async {
-                      final pid = p['id'];
-                      final pay = await ApiClient.instance.post('/payments/pay?member_id=$memberId&payment_id=$pid');
-                      if (pay.statusCode >= 200 && pay.statusCode < 300) {
-                        ApiClient.instance.invalidateCache();
-                        final idx = payments.indexWhere((x) => x['id'] == pid);
-                        if (idx >= 0) payments[idx]['status'] = 'Paid';
-                        setModalState(() {});
-                        onSuccess();
-                        if (ctx.mounted) ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Payment recorded')));
-                      }
-                    },
-                    child: const Text('Pay'),
-                  ),
-                )),
-                if (unpaidMonthly.isEmpty && unpaidRegistration.isEmpty)
-                  const Padding(padding: EdgeInsets.all(16), child: Text('No pending dues')),
-                const SizedBox(height: 16),
-                const Divider(),
-                Text('Log Payment and issue invoice', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-                const SizedBox(height: 4),
-                Text(
-                  '₹$monthlyAmount for ${membershipType == 'pt' ? 'Personal Training' : 'Regular'}. Payment date will be recorded.',
-                  style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600),
-                ),
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  icon: const Icon(Icons.calendar_today, size: 20),
-                  label: const Text('Log Payment and issue invoice'),
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    _showLogMonthlyDialog(context, memberId, name, monthlyAmount, onSuccess);
-                  },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  static void _showLogMonthlyDialog(BuildContext context, String memberId, String name, int amount, VoidCallback onSuccess) async {
-    final now = DateTime.now();
-    final periodController = TextEditingController(text: formatApiDate(now).substring(0, 7));
-    final dateController = TextEditingController(text: formatApiDate(now));
-    await showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setState) => AlertDialog(
-          title: Text('Log payment • $name'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('Amount: ₹$amount (monthly)', style: GoogleFonts.poppins()),
-              const SizedBox(height: 12),
-              ListTile(
-                title: const Text('Period (YYYY-MM)'),
-                subtitle: Text(periodController.text),
-                onTap: () async {
-                  final d = await showDatePicker(context: ctx, initialDate: now, firstDate: DateTime(2020), lastDate: now);
-                  if (d != null) {
-                    periodController.text = formatApiDate(d).substring(0, 7);
-                    setState(() {});
-                  }
-                },
-              ),
-              ListTile(
-                title: const Text('Payment date'),
-                subtitle: Text(parseApiDate(dateController.text) != null ? formatDisplayDate(parseApiDate(dateController.text)) : dateController.text),
-                onTap: () async {
-                  final d = await showDatePicker(context: ctx, initialDate: now, firstDate: DateTime(2020), lastDate: now);
-                  if (d != null) {
-                    dateController.text = formatApiDate(d);
-                    setState(() {});
-                  }
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-            FilledButton(
-              onPressed: () async {
-                final period = periodController.text.trim();
-                final paymentDate = dateController.text.trim();
-                Navigator.pop(ctx);
-                try {
-                  final r = await ApiClient.instance.post(
-                    '/payments/log-monthly',
-                    headers: {'Content-Type': 'application/json'},
-                    body: jsonEncode({'member_id': memberId, 'period': period, 'amount': amount, 'payment_date': paymentDate}),
-                  );
-                  if (r.statusCode >= 200 && r.statusCode < 300) {
-                    ApiClient.instance.invalidateCache();
-                    onSuccess();
-                    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Monthly payment logged')));
-                  }
-                } catch (e) {
-                  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-                }
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -632,7 +562,7 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text('₹${inv['total']} • ${inv['status']} • #${inv['id']?.toString().substring(0, 8) ?? ''}'),
+                            Text('₹${inv['total']} • ${inv['status']} • ${inv['bill_number'] ?? '#${inv['id']?.toString().substring(0, 8) ?? ''}'}', style: GoogleFonts.poppins(fontSize: 13)),
                             if (issuedStr != null) Text('Issued: $issuedStr', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
                             if (paidStr != null && inv['status'] == 'Paid') Text('Paid on: $paidStr', style: GoogleFonts.poppins(fontSize: 12, color: AppTheme.success)),
                           ],
@@ -657,7 +587,7 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Invoice • ${inv['member_name']}'),
+        title: Text('Invoice • ${inv['member_name']}${inv['bill_number'] != null ? ' • ${inv['bill_number']}' : ''}'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,

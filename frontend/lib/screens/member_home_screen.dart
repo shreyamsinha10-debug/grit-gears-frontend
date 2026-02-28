@@ -15,9 +15,12 @@ import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 
 import '../core/api_client.dart';
+import '../core/secure_storage.dart';
 import '../widgets/skeleton_loading.dart';
 import '../widgets/attendance_stats_card.dart';
 import '../theme/app_theme.dart';
+import 'login_screen.dart';
+import 'member_inbox_screen.dart';
 
 class MemberHomeScreen extends StatefulWidget {
   final Map<String, dynamic> member;
@@ -41,6 +44,7 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
   final ImagePicker _imagePicker = ImagePicker();
   Map<String, dynamic>? _attendanceStats;
   bool _loadingStats = true;
+  int _inboxCount = 0;
 
   @override
   void initState() {
@@ -53,6 +57,17 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
     _loadPayments();
     _loadFullMember();
     _loadStats();
+    _loadInboxCount();
+  }
+
+  Future<void> _loadInboxCount() async {
+    try {
+      final r = await ApiClient.instance.get('/messages/inbox', useCache: false);
+      if (mounted && r.statusCode >= 200 && r.statusCode < 300) {
+        final list = jsonDecode(r.body) as List<dynamic>? ?? [];
+        setState(() => _inboxCount = list.length);
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadStats() async {
@@ -66,6 +81,21 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
           _attendanceStats = jsonDecode(r.body) as Map<String, dynamic>;
           _loadingStats = false;
         });
+      } else if (mounted && r.statusCode == 403) {
+        final body = jsonDecode(r.body) as Map<String, dynamic>?;
+        final detail = body?['detail']?.toString() ?? '';
+        if (detail.toLowerCase().contains('portal') || detail.toLowerCase().contains('not active') || detail.toLowerCase().contains('blocked')) {
+          await SecureStorage.setAuthToken(null);
+          await SecureStorage.setAuthRole(null);
+          ApiClient.setAuthToken(null);
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => LoginScreen(initialMessage: detail.isNotEmpty ? detail : 'Portal access is blocked. Your membership is not active.')),
+            );
+          }
+        }
+        setState(() => _loadingStats = false);
       } else if (mounted) setState(() => _loadingStats = false);
     } catch (_) {
       if (mounted) setState(() => _loadingStats = false);
@@ -87,6 +117,20 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
             _checkedOutToday = todayStatus['checked_out'] == true;
           }
         });
+      } else if (mounted && r.statusCode == 403) {
+        final body = jsonDecode(r.body) as Map<String, dynamic>?;
+        final detail = body?['detail']?.toString() ?? '';
+        if (detail.toLowerCase().contains('portal') || detail.toLowerCase().contains('not active') || detail.toLowerCase().contains('blocked')) {
+          await SecureStorage.setAuthToken(null);
+          await SecureStorage.setAuthRole(null);
+          ApiClient.setAuthToken(null);
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => LoginScreen(initialMessage: detail.isNotEmpty ? detail : 'Portal access is blocked. Your membership is not active.')),
+            );
+          }
+        }
       }
     } catch (_) {}
   }
@@ -258,6 +302,7 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
     final dietChart = m['diet_chart'] as String? ?? '';
     final padding = LayoutConstants.screenPadding(context);
     final radius = LayoutConstants.cardRadius(context);
+    final isActive = (status.toLowerCase() == 'active');
 
     return Scaffold(
       backgroundColor: AppTheme.surface,
@@ -277,6 +322,18 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
         ),
         backgroundColor: AppTheme.surface,
         foregroundColor: AppTheme.onSurface,
+        actions: [
+          IconButton(
+            icon: _inboxCount > 0
+                ? Badge(
+                    label: Text('$_inboxCount', style: const TextStyle(fontSize: 10)),
+                    child: const Icon(Icons.inbox_rounded),
+                  )
+                : const Icon(Icons.inbox_rounded),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MemberInboxScreen())).then((_) => _loadInboxCount()),
+            tooltip: 'Inbox',
+          ),
+        ],
       ),
       body: Padding(
         padding: EdgeInsets.all(padding),
@@ -298,6 +355,37 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
                       Text('Status: $status', style: GoogleFonts.poppins(color: Colors.grey.shade600)),
                       if (lastAttendance.isNotEmpty) Text('Last check-in: $lastAttendance', style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 13)),
                     ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              InkWell(
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MemberInboxScreen())).then((_) => _loadInboxCount()),
+                borderRadius: BorderRadius.circular(radius),
+                child: Card(
+                  color: AppTheme.surfaceVariant,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius), side: BorderSide(color: AppTheme.primary.withOpacity(0.3))),
+                  child: Padding(
+                    padding: EdgeInsets.all(padding),
+                    child: Row(
+                      children: [
+                        Icon(Icons.inbox_rounded, size: 28, color: AppTheme.primary),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Messages', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
+                              Text(
+                                _inboxCount == 0 ? 'No new messages' : '$_inboxCount message${_inboxCount == 1 ? '' : 's'} from gym',
+                                style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade600),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (_inboxCount > 0) Icon(Icons.chevron_right, color: AppTheme.primary),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -437,6 +525,30 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
                 ),
               ),
               const SizedBox(height: 20),
+              if (!isActive)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.orange.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline_rounded, size: 20, color: Colors.orange.shade700),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Check-in and check-out are disabled for inactive or cancelled membership.',
+                            style: GoogleFonts.poppins(fontSize: 13, color: Colors.orange.shade900),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               // Inbox, Check In, Check Out – for viewing due fees and marking entry/exit
               Row(
                 children: [
@@ -466,7 +578,7 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: FilledButton.icon(
-                      onPressed: (_checkedInToday || _checkingIn) ? null : _checkInSelf,
+                      onPressed: (_checkedInToday || _checkingIn || !isActive) ? null : _checkInSelf,
                       icon: _checkingIn
                           ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.onPrimary))
                           : Icon(_checkedInToday ? Icons.check_circle : Icons.login, size: 20),
@@ -484,7 +596,7 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: (_checkedOutToday || _checkingOut || !_checkedInToday) ? null : _checkOutSelf,
+                      onPressed: (_checkedOutToday || _checkingOut || !_checkedInToday || !isActive) ? null : _checkOutSelf,
                       icon: _checkingOut
                           ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                           : Icon(_checkedOutToday ? Icons.check_circle : Icons.logout, size: 20),

@@ -34,7 +34,22 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   final _addressController = TextEditingController();
 
   String _membershipType = 'Regular';
+  /// When user selects a membership plan from gym settings, this is the plan id; otherwise null (legacy Regular/PT).
+  String? _selectedPlanId;
   String _batch = 'Morning';
+  List<Map<String, dynamic>> _plans = [];
+  /// Batches from gym profile: { name, start_time?, end_time? }. Used for Batch dropdown when non-empty.
+  List<Map<String, dynamic>> _batches = [];
+  bool _plansLoaded = false;
+
+  final ImagePicker _imagePicker = ImagePicker();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPlans();
+  }
+
   String? _gender;
   DateTime? _dateOfBirth;
   bool _isSubmitting = false;
@@ -46,7 +61,64 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   /// Type of ID: Aadhar, Driving Licence, Voter ID, Passport.
   String _idDocumentType = 'Aadhar';
 
-  final ImagePicker _imagePicker = ImagePicker();
+  Future<void> _loadPlans() async {
+    try {
+      final r = await ApiClient.instance.get('/gym/profile', useCache: true);
+      if (mounted && r.statusCode >= 200 && r.statusCode < 300) {
+        final data = jsonDecode(r.body) as Map<String, dynamic>;
+        final list = data['plans'] as List<dynamic>? ?? [];
+        final batchList = data['batches'] as List<dynamic>? ?? [];
+        setState(() {
+          _plans = list.map((p) {
+            final m = p as Map<String, dynamic>;
+            return <String, dynamic>{
+              'id': m['id'] as String?,
+              'name': m['name'] as String?,
+              'price': (m['price'] as num?)?.toInt() ?? 0,
+              'duration_type': m['duration_type'] as String?,
+              'is_active': m['is_active'] != false,
+            };
+          }).where((p) => p['is_active'] == true).toList();
+          _batches = batchList.map((b) {
+            final m = b as Map<String, dynamic>;
+            final name = (m['name'] as String? ?? '').trim();
+            if (name.isEmpty) return null;
+            return <String, dynamic>{
+              'name': name,
+              'start_time': m['start_time'] as String?,
+              'end_time': m['end_time'] as String?,
+            };
+          }).whereType<Map<String, dynamic>>().toList();
+          if (_batches.isNotEmpty && !_batches.any((b) => b['name'] == _batch)) {
+            _batch = _batches.first['name'] as String;
+          }
+          _plansLoaded = true;
+        });
+      } else {
+        setState(() => _plansLoaded = true);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _plansLoaded = true);
+    }
+  }
+
+  /// Format "06:00" / "18:00" to "6:00 am" / "6:00 pm" for display.
+  static String _formatTimeDisplay(String? time) {
+    if (time == null || time.isEmpty) return '';
+    final parts = time.split(':');
+    if (parts.isEmpty) return time;
+    final h = int.tryParse(parts[0]) ?? 0;
+    final m = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
+    if (h == 0 && m == 0) return '12:00 am';
+    if (h == 12) return '12:${m.toString().padLeft(2, '0')} pm';
+    if (h < 12) return '$h:${m.toString().padLeft(2, '0')} am';
+    return '${h - 12}:${m.toString().padLeft(2, '0')} pm';
+  }
+
+  String _durationLabel(String? type) {
+    const map = {'1m': 'month', '2m': '2mo', '3m': '3mo', '6m': '6mo', '1yr': 'year', 'one_time': 'one time'};
+    return map[type] ?? type ?? '';
+  }
 
   @override
   void dispose() {
@@ -120,6 +192,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         'batch': _batch,
         'status': 'Active',
       };
+      if (_selectedPlanId != null && _selectedPlanId!.isNotEmpty) body['plan_id'] = _selectedPlanId;
       final address = _addressController.text.trim();
       if (address.isNotEmpty) body['address'] = address;
       if (_dateOfBirth != null) body['date_of_birth'] = formatApiDate(_dateOfBirth!);
@@ -145,7 +218,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         _emailController.clear();
         setState(() {
           _membershipType = 'Regular';
-          _batch = 'Morning';
+          _selectedPlanId = null;
+          _batch = _batches.isNotEmpty ? (_batches.first['name'] as String) : 'Morning';
           _dateOfBirth = null;
           _addressController.clear();
           _gender = null;
@@ -311,28 +385,66 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                   ),
                   const SizedBox(height: 20),
                   DropdownButtonFormField<String>(
-                    value: _membershipType,
+                    value: _selectedPlanId ?? _membershipType,
                     decoration: _inputDecoration('Membership Type', null),
                     dropdownColor: AppTheme.surfaceVariant,
                     style: GoogleFonts.poppins(color: AppTheme.onSurface, fontSize: 16),
                     items: [
                       DropdownMenuItem(value: 'Regular', child: Text('Regular', style: GoogleFonts.poppins(color: AppTheme.onSurface))),
                       DropdownMenuItem(value: 'PT', child: Text('PT', style: GoogleFonts.poppins(color: AppTheme.onSurface))),
+                      ..._plans.map((p) {
+                        final id = p['id'] as String? ?? '';
+                        final name = p['name'] as String? ?? '';
+                        final price = p['price'] as int? ?? 0;
+                        final dur = _durationLabel(p['duration_type'] as String?);
+                        return DropdownMenuItem(
+                          value: id,
+                          child: Text('$name - ₹$price/$dur', style: GoogleFonts.poppins(color: AppTheme.onSurface)),
+                        );
+                      }),
                     ],
-                    onChanged: (v) => setState(() => _membershipType = v ?? 'Regular'),
+                    onChanged: (v) {
+                      if (v == null) return;
+                      if (v == 'Regular' || v == 'PT') {
+                        setState(() {
+                          _selectedPlanId = null;
+                          _membershipType = v;
+                        });
+                      } else {
+                        Map<String, dynamic>? found;
+                        for (final p in _plans) {
+                          if (p['id'] == v) {
+                            found = p;
+                            break;
+                          }
+                        }
+                        setState(() {
+                          _selectedPlanId = v;
+                          _membershipType = found?['name'] as String? ?? v;
+                        });
+                      }
+                    },
                   ),
                   const SizedBox(height: 20),
                   DropdownButtonFormField<String>(
-                    value: _batch,
+                    value: _batches.isEmpty ? _batch : (_batches.any((b) => b['name'] == _batch) ? _batch : (_batches.isNotEmpty ? _batches.first['name'] as String : 'Morning')),
                     decoration: _inputDecoration('Batch', null),
                     dropdownColor: AppTheme.surfaceVariant,
                     style: GoogleFonts.poppins(color: AppTheme.onSurface, fontSize: 16),
-                    items: [
-                      DropdownMenuItem(value: 'Morning', child: Text('Morning', style: GoogleFonts.poppins(color: AppTheme.onSurface))),
-                      DropdownMenuItem(value: 'Evening', child: Text('Evening', style: GoogleFonts.poppins(color: AppTheme.onSurface))),
-                      DropdownMenuItem(value: 'Ladies', child: Text('Ladies', style: GoogleFonts.poppins(color: AppTheme.onSurface))),
-                    ],
-                    onChanged: (v) => setState(() => _batch = v ?? 'Morning'),
+                    items: _batches.isEmpty
+                        ? [
+                            DropdownMenuItem(value: 'Morning', child: Text('Morning', style: GoogleFonts.poppins(color: AppTheme.onSurface))),
+                            DropdownMenuItem(value: 'Evening', child: Text('Evening', style: GoogleFonts.poppins(color: AppTheme.onSurface))),
+                            DropdownMenuItem(value: 'Ladies', child: Text('Ladies', style: GoogleFonts.poppins(color: AppTheme.onSurface))),
+                          ]
+                        : _batches.map((b) {
+                            final name = b['name'] as String;
+                            final st = _formatTimeDisplay(b['start_time'] as String?);
+                            final et = _formatTimeDisplay(b['end_time'] as String?);
+                            final label = st.isEmpty && et.isEmpty ? name : '$name ${st.isEmpty ? '' : st}${st.isEmpty || et.isEmpty ? '' : ' – '}$et';
+                            return DropdownMenuItem(value: name, child: Text(label, style: GoogleFonts.poppins(color: AppTheme.onSurface)));
+                          }).toList(),
+                    onChanged: (v) => setState(() => _batch = v ?? (_batches.isNotEmpty ? _batches.first['name'] as String : 'Morning')),
                   ),
                   const SizedBox(height: 24),
                   Text(

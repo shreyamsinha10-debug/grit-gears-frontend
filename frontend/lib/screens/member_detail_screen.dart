@@ -111,6 +111,7 @@ Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
                 items: const [
                   DropdownMenuItem(value: 'Active', child: Text('Active')),
                   DropdownMenuItem(value: 'Inactive', child: Text('Inactive')),
+                  DropdownMenuItem(value: 'Disabled', child: Text('Disabled')),
                 ],
                 onChanged: (v) => setDialogState(() => status = v ?? status),
               ),
@@ -575,13 +576,13 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
           ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
-            tooltip: 'More – Reset password, Delete member',
+            tooltip: 'More options',
             onSelected: (v) {
-              if (v == 'reset') _showResetPasswordDialog();
               if (v == 'delete') _deleteMember();
+              if (v == 'reset_password') _showResetPasswordDialog();
             },
             itemBuilder: (context) => [
-              const PopupMenuItem(value: 'reset', child: Text('Reset / Assign Password')),
+              const PopupMenuItem(value: 'reset_password', child: Text('Reset / Assign Password')),
               const PopupMenuItem(value: 'delete', child: Text('Delete Member', style: TextStyle(color: Colors.red))),
             ],
           ),
@@ -637,6 +638,33 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
                   },
                 ),
               ],
+            ),
+          ),
+          SafeArea(
+            top: false,
+            child: Container(
+              width: double.infinity,
+              padding: EdgeInsets.fromLTRB(padding, 12, padding, 12 + MediaQuery.of(context).padding.bottom),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.06),
+                    blurRadius: 8,
+                    offset: const Offset(0, -2),
+                  ),
+                ],
+              ),
+              child: FilledButton.icon(
+                onPressed: _showResetPasswordDialog,
+                icon: const Icon(Icons.lock_reset, size: 20),
+                label: const Text('Reset / Assign Password'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: AppTheme.onPrimary,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
             ),
           ),
         ],

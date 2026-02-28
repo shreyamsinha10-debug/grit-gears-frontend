@@ -9,6 +9,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -25,6 +26,7 @@ import 'dashboard_screen.dart';
 import 'gym_settings_screen.dart';
 import 'member_detail_screen.dart';
 import 'registration_screen.dart';
+import 'broadcast_messages_screen.dart';
 
 /// Breakpoint below which overview cards stack vertically (avoid overflow on phones).
 const double _overviewNarrowBreakpoint = 420;
@@ -148,6 +150,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ),
         actions: [
           IconButton(
+            icon: const Icon(FontAwesomeIcons.bullhorn),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BroadcastMessagesScreen())),
+            tooltip: 'Broadcast Messages',
+          ),
+          IconButton(
             icon: const Icon(FontAwesomeIcons.chartSimple),
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const HeatmapScreen())),
             tooltip: 'Occupancy heatmap',
@@ -170,7 +177,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           child: IndexedStack(
             index: _selectedIndex,
             children: [
-              _visitedTabs.contains(0) ? _OverviewTab(isActive: _selectedIndex == 0, onReturnFromGymSettings: _loadGymProfile) : const SizedBox.shrink(),
+              _visitedTabs.contains(0) ? _OverviewTab(isActive: _selectedIndex == 0) : const SizedBox.shrink(),
               _visitedTabs.contains(1)
                   ? _MembersTab(
                       refreshKey: _membersRefreshKey,
@@ -178,11 +185,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                         await Navigator.push(context, MaterialPageRoute(builder: (_) => const RegistrationScreen()));
                         setState(() => _membersRefreshKey++);
                       },
+                      onImportPressed: _importMembers,
                       onMemberTap: (m) => Navigator.push(context, MaterialPageRoute(builder: (_) => MemberDetailScreen(member: m))).then((_) => setState(() => _membersRefreshKey++)),
                     )
                   : const SizedBox.shrink(),
               _visitedTabs.contains(2) ? _FeesTab(isActive: _selectedIndex == 2) : const SizedBox.shrink(),
               _visitedTabs.contains(3) ? const _BillingTab() : const SizedBox.shrink(),
+              _visitedTabs.contains(4) ? GymSettingsScreen(embedded: true, onSaved: _loadGymProfile) : const SizedBox.shrink(),
             ],
           ),
         ),
@@ -204,6 +213,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           NavigationDestination(icon: Icon(FontAwesomeIcons.users), label: 'Members'),
           NavigationDestination(icon: Icon(FontAwesomeIcons.indianRupeeSign), label: 'Fees'),
           NavigationDestination(icon: Icon(FontAwesomeIcons.fileInvoiceDollar), label: 'Billing'),
+          NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
     );
@@ -272,6 +282,47 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       );
     }
   }
+
+  Future<void> _importMembers() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['xlsx'],
+      withData: false,
+    );
+    if (result == null || result.files.isEmpty || result.files.single.path == null) return;
+    final path = result.files.single.path!;
+    final name = result.files.single.name;
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Importing members…')));
+    try {
+      final response = await ApiClient.instance.postMultipart(
+        '/members/import',
+        fileField: 'file',
+        filePath: path,
+        filename: name,
+      );
+      if (!context.mounted) return;
+      final body = jsonDecode(response.body);
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final created = body['created'] as int? ?? 0;
+        final updated = body['updated'] as int? ?? 0;
+        final errors = body['errors'] as List<dynamic>? ?? [];
+        String msg = 'Imported: $created created, $updated updated.';
+        if (errors.isNotEmpty) {
+          final first = errors.take(3).map((e) => 'Row ${e['row']}: ${e['message']}').join('; ');
+          msg += ' ${errors.length} error(s): $first';
+        }
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 4)));
+        setState(() => _membersRefreshKey++);
+      } else {
+        final detail = body['detail'] ?? response.body;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Import failed: $detail')));
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Import failed: $e')));
+    }
+  }
 }
 
 class _BillingTab extends StatelessWidget {
@@ -285,8 +336,7 @@ class _BillingTab extends StatelessWidget {
 
 class _OverviewTab extends StatefulWidget {
   final bool isActive;
-  final VoidCallback? onReturnFromGymSettings;
-  const _OverviewTab({this.isActive = false, this.onReturnFromGymSettings});
+  const _OverviewTab({this.isActive = false});
 
   @override
   State<_OverviewTab> createState() => _OverviewTabState();
@@ -539,12 +589,6 @@ class _OverviewTabState extends State<_OverviewTab> {
               label: Text(_sendingReminders ? 'Sending...' : 'Send Payment Reminders'),
               style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: AppTheme.onPrimary),
             ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GymSettingsScreen())).then((_) => widget.onReturnFromGymSettings?.call()),
-              icon: const Icon(Icons.settings),
-              label: const Text('Gym settings (name, logo, invoice name)'),
-            ),
           ],
         ),
       ),
@@ -621,9 +665,10 @@ class _AnalyticsCard extends StatelessWidget {
 class _MembersTab extends StatefulWidget {
   final int refreshKey;
   final VoidCallback onRegisterPressed;
+  final VoidCallback? onImportPressed;
   final void Function(dynamic member) onMemberTap;
 
-  const _MembersTab({required this.refreshKey, required this.onRegisterPressed, required this.onMemberTap});
+  const _MembersTab({required this.refreshKey, required this.onRegisterPressed, this.onImportPressed, required this.onMemberTap});
 
   @override
   State<_MembersTab> createState() => _MembersTabState();
@@ -665,6 +710,14 @@ class _MembersTabState extends State<_MembersTab> {
                 label: const Text('Register'),
                 style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: AppTheme.onPrimary),
               ),
+              if (widget.onImportPressed != null) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: widget.onImportPressed,
+                  icon: const Icon(FontAwesomeIcons.fileImport, size: 18),
+                  label: const Text('Import Members'),
+                ),
+              ],
             ],
           )
         else
@@ -690,6 +743,14 @@ class _MembersTabState extends State<_MembersTab> {
                 label: const Text('Register'),
                 style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: AppTheme.onPrimary),
               ),
+              if (widget.onImportPressed != null) ...[
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: widget.onImportPressed,
+                  icon: const Icon(FontAwesomeIcons.fileImport, size: 18),
+                  label: const Text('Import Members'),
+                ),
+              ],
             ],
           ),
         const SizedBox(height: 12),

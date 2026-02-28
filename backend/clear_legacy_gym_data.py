@@ -1,8 +1,8 @@
 """
-One-time script: remove all data for the legacy admin (9999999999) / Default (Legacy) gym.
+One-time script: clear all members, attendance, payments, and invoices for a given gym.
+Gym is identified by app_config["default_gym_id"] or by name "Default (Legacy)" if no config.
 Run from backend folder: python clear_legacy_gym_data.py
-Uses same MONGODB_URL and DATABASE_NAME as main.py. Keeps the default gym document
-so 9999999999 can still log in with an empty slate.
+Uses same MONGODB_URL and DATABASE_NAME as main.py.
 """
 
 import asyncio
@@ -61,12 +61,11 @@ async def main():
     r_payments = await payments_collection.delete_many(gym_filter)
     r_invoices = await invoices_collection.delete_many(gym_filter)
 
-    print("Legacy gym data cleared (Default (Legacy) / 9999999999):")
+    print("Gym data cleared:")
     print(f"  Members deleted:    {r_members.deleted_count}")
     print(f"  Attendance deleted:  {r_attendance.deleted_count}")
     print(f"  Payments deleted:   {r_payments.deleted_count}")
     print(f"  Invoices deleted:   {r_invoices.deleted_count}")
-    print("Legacy admin 9999999999 can log in with an empty slate.")
     client.close()
 
 

@@ -6,7 +6,7 @@ or SMS. For now, all notifications are printed to the backend console so you can
 the flow when testing registration, payment received, fee reminders, or status change.
 
 Usage: from utils import send_notification
-  send_notification("registration", {"name": "John", "phone": "9999999999", "email": "j@x.com"})
+  send_notification("registration", {"name": "John", "phone": "9876543210", "email": "j@x.com"})
   send_notification("payment_received", user, {"amount": 500})
 """
 

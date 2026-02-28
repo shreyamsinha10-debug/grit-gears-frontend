@@ -295,6 +295,16 @@ class ApiClient {
     }
   }
 
+  /// For multipart file upload (e.g. import Excel).
+  Future<http.Response> postMultipart(String path, {required String fileField, required String filePath, String? filename}) async {
+    final uri = Uri.parse(baseUrl + path);
+    final request = http.MultipartRequest('POST', uri);
+    request.headers.addAll(_authHeaders(null));
+    request.files.add(await http.MultipartFile.fromPath(fileField, filePath, filename: filename ?? 'file.xlsx'));
+    final streamed = await request.send();
+    return http.Response.fromStream(streamed);
+  }
+
   Future<http.Response> delete(String path, {Map<String, String>? headers}) async {
     try {
       final response = await _clientOrCreate

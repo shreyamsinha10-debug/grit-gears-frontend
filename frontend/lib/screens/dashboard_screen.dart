@@ -152,7 +152,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       final response = await ApiClient.instance.get(
         '/members',
-        queryParameters: {'brief': 'true', 'skip': '$_skip', 'limit': '$_pageSize'},
+        queryParameters: {'brief': 'true', 'include_avatar': 'true', 'skip': '$_skip', 'limit': '$_pageSize'},
         useCache: !append,
       );
 
