@@ -6,6 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../theme/app_theme.dart' show defaultGymName, defaultLogoAsset;
+import 'date_utils.dart';
 
 class PdfInvoiceHelper {
   /// [gymProfile] optional: { name, logo_base64, invoice_name } from GET /gym/profile. If provided, logo and name are used on the invoice.
@@ -42,7 +43,7 @@ class PdfInvoiceHelper {
         : defaultGymName;
     final invoiceNo = invoice['id']?.toString().substring(0, 8).toUpperCase() ?? '';
     final date = invoice['issued_at'] != null
-        ? DateTime.parse(invoice['issued_at'].toString()).toLocal().toString().split(' ')[0]
+        ? formatDisplayDate(parseApiDateTime(invoice['issued_at'].toString()))
         : '';
     final memberName = invoice['member_name'] ?? '';
     final memberId = invoice['member_id']?.toString().substring(0, 8).toUpperCase() ?? '';

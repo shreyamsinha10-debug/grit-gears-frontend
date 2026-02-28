@@ -22,6 +22,7 @@ import '../core/date_utils.dart';
 import '../theme/app_theme.dart';
 import '../widgets/attendance_stats_card.dart';
 import 'dashboard_screen.dart';
+import 'login_screen.dart';
 
 /// Shows edit member dialog; returns updated [Member] on save, null on cancel.
 Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
@@ -574,6 +575,11 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
             tooltip: 'Edit',
             onPressed: _showEditDialog,
           ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Logout',
+            onPressed: () => LoginScreen.logout(context),
+          ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
             tooltip: 'More options',
@@ -585,6 +591,11 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
               const PopupMenuItem(value: 'reset_password', child: Text('Reset / Assign Password')),
               const PopupMenuItem(value: 'delete', child: Text('Delete Member', style: TextStyle(color: Colors.red))),
             ],
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Logout',
+            onPressed: () => LoginScreen.logout(context),
           ),
         ],
       ),
@@ -1008,7 +1019,7 @@ class _PaymentsTab extends StatelessWidget {
           ...payments.map<Widget>((e) {
             final p = e as Map<String, dynamic>;
             final paidAt = p['paid_at'];
-            final paidDateStr = paidAt != null ? formatDisplayDate(parseApiDate(paidAt.toString())) : null;
+            final paidDateStr = paidAt != null ? formatDisplayDate(parseApiDateTime(paidAt.toString())) : null;
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
               child: ListTile(
@@ -1081,8 +1092,8 @@ class _AttendanceTab extends StatelessWidget {
           else
             ...attendanceList.map<Widget>((e) {
               final a = e as Map<String, dynamic>;
-              final checkInDt = parseApiDate(a['check_in_at']?.toString());
-              final checkOutDt = parseApiDate(a['check_out_at']?.toString());
+              final checkInDt = parseApiDateTime(a['check_in_at']?.toString());
+              final checkOutDt = parseApiDateTime(a['check_out_at']?.toString());
               final inStr = formatDisplayTime(checkInDt);
               final outStr = checkOutDt != null ? formatDisplayTime(checkOutDt) : '—';
               return Card(

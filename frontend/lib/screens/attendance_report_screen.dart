@@ -13,6 +13,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../core/api_client.dart';
 import '../core/date_utils.dart';
 import '../theme/app_theme.dart';
+import 'login_screen.dart';
 
 /// Breakpoint below which layout stacks vertically (e.g. title + button).
 const double _attendanceNarrowBreakpoint = 480;
@@ -48,10 +49,16 @@ class AttendanceEntry {
   factory AttendanceEntry.fromJson(Map<String, dynamic> json) {
     final checkInStr = json['check_in_at'] as String?;
     DateTime checkIn = DateTime.now();
-    if (checkInStr != null) checkIn = DateTime.parse(checkInStr);
+    if (checkInStr != null) {
+      final parsed = parseApiDateTime(checkInStr);
+      if (parsed != null) checkIn = parsed;
+      else checkIn = DateTime.parse(checkInStr);
+    }
     DateTime? checkOut;
     final checkOutStr = json['check_out_at'] as String?;
-    if (checkOutStr != null && checkOutStr.isNotEmpty) checkOut = DateTime.tryParse(checkOutStr);
+    if (checkOutStr != null && checkOutStr.isNotEmpty) {
+      checkOut = parseApiDateTime(checkOutStr) ?? DateTime.tryParse(checkOutStr);
+    }
     return AttendanceEntry(
       id: json['id'] as String? ?? '',
       memberId: json['member_id'] as String? ?? '',
@@ -327,6 +334,11 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
         title: const Text('Attendance Records'),
         actions: [
           IconButton(icon: const Icon(Icons.refresh), onPressed: _loading ? null : () { _load(); _loadSummary(); }),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Logout',
+            onPressed: () => LoginScreen.logout(context),
+          ),
         ],
       ),
       body: RefreshIndicator(

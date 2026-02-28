@@ -25,6 +25,18 @@ class LoginScreen extends StatefulWidget {
 
   const LoginScreen({super.key, this.initialMessage});
 
+  /// Call from any screen to clear auth and navigate back to login (e.g. logout button in AppBar).
+  static Future<void> logout(BuildContext context) async {
+    await SecureStorage.setAuthToken(null);
+    ApiClient.setAuthToken(null);
+    await SecureStorage.setAuthRole(null);
+    if (!context.mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (_) => false,
+    );
+  }
+
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }

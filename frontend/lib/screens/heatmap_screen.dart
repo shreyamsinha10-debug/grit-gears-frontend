@@ -11,6 +11,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../core/api_client.dart';
 import '../core/date_utils.dart';
 import '../theme/app_theme.dart';
+import 'login_screen.dart';
 
 class HeatmapScreen extends StatefulWidget {
   const HeatmapScreen({super.key});
@@ -87,6 +88,13 @@ class _HeatmapScreenState extends State<HeatmapScreen> {
       appBar: AppBar(
         title: Text('Occupancy heatmap', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
         leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new_rounded), onPressed: () => Navigator.of(context).pop()),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Logout',
+            onPressed: () => LoginScreen.logout(context),
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))

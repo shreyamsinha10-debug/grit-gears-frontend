@@ -333,6 +333,11 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MemberInboxScreen())).then((_) => _loadInboxCount()),
             tooltip: 'Inbox',
           ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Logout',
+            onPressed: () => LoginScreen.logout(context),
+          ),
         ],
       ),
       body: Padding(

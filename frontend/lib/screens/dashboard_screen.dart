@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/api_client.dart';
+import '../core/date_utils.dart';
 import '../theme/app_theme.dart';
 import '../widgets/animated_fade.dart';
 import '../widgets/skeleton_loading.dart';
@@ -61,16 +62,8 @@ class Member {
   });
 
   factory Member.fromJson(Map<String, dynamic> json) {
-    DateTime? createdAt;
-    try {
-      final v = json['created_at'];
-      if (v != null) createdAt = DateTime.tryParse(v.toString());
-    } catch (_) {}
-    DateTime? lastAttendanceDate;
-    try {
-      final v = json['last_attendance_date'];
-      if (v != null) lastAttendanceDate = DateTime.tryParse(v.toString());
-    } catch (_) {}
+    final createdAt = parseApiDateTime(json['created_at']?.toString());
+    final lastAttendanceDate = parseApiDate(json['last_attendance_date']?.toString());
     
     bool? isCheckedIn;
     bool? isCheckedOut;

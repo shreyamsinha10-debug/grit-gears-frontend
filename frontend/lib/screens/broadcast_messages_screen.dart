@@ -13,6 +13,7 @@ import '../core/api_client.dart';
 import '../core/date_utils.dart';
 import '../theme/app_theme.dart';
 import 'dashboard_screen.dart';
+import 'login_screen.dart';
 
 class BroadcastMessagesScreen extends StatefulWidget {
   const BroadcastMessagesScreen({super.key});
@@ -173,7 +174,7 @@ class _BroadcastMessagesScreenState extends State<BroadcastMessagesScreen> {
             content: Text(is404
                 ? 'Messages API not found (404). Ensure your server is up to date and supports POST /messages.'
                 : err),
-            duration: is404 ? const Duration(seconds: 5) : null,
+            duration: is404 ? const Duration(seconds: 5) : const Duration(seconds: 4),
           ),
         );
       }
@@ -274,7 +275,7 @@ class _BroadcastMessagesScreenState extends State<BroadcastMessagesScreen> {
   static String _formatDate(dynamic v) {
     if (v == null) return '—';
     try {
-      final dt = DateTime.tryParse(v.toString());
+      final dt = parseApiDateTime(v.toString());
       return dt != null ? formatDisplayDateTime(dt) : v.toString();
     } catch (_) {
       return v.toString();
@@ -291,6 +292,13 @@ class _BroadcastMessagesScreenState extends State<BroadcastMessagesScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text('Broadcast Messages', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Logout',
+            onPressed: () => LoginScreen.logout(context),
+          ),
+        ],
       ),
       body: RefreshIndicator(
         onRefresh: _loadSent,

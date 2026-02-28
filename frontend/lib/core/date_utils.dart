@@ -48,3 +48,16 @@ DateTime? parseApiDate(String? value) {
     return null;
   }
 }
+
+/// Parse API datetime (ISO 8601). If no timezone is present, treats as UTC so that
+/// toLocal() in display formatters shows correct local time (e.g. IST).
+DateTime? parseApiDateTime(String? value) {
+  if (value == null || value.isEmpty) return null;
+  try {
+    final s = value.toString().trim();
+    final hasTz = s.endsWith('Z') || RegExp(r'[+-]\d{2}:?\d{2}$').hasMatch(s);
+    return DateTime.parse(hasTz ? s : s + 'Z');
+  } catch (_) {
+    return null;
+  }
+}

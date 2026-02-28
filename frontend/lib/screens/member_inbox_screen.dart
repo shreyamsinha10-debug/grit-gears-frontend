@@ -10,6 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../core/api_client.dart';
 import '../core/date_utils.dart';
 import '../theme/app_theme.dart';
+import 'login_screen.dart';
 
 class MemberInboxScreen extends StatefulWidget {
   const MemberInboxScreen({super.key});
@@ -47,7 +48,7 @@ class _MemberInboxScreenState extends State<MemberInboxScreen> {
   static String _formatDate(dynamic v) {
     if (v == null) return '—';
     try {
-      final dt = DateTime.tryParse(v.toString());
+      final dt = parseApiDateTime(v.toString());
       return dt != null ? formatDisplayDateTime(dt) : v.toString();
     } catch (_) {
       return v.toString();
@@ -64,6 +65,13 @@ class _MemberInboxScreenState extends State<MemberInboxScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Text('Inbox', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Logout',
+            onPressed: () => LoginScreen.logout(context),
+          ),
+        ],
       ),
       body: RefreshIndicator(
         onRefresh: _load,

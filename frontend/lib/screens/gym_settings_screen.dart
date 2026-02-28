@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../core/api_client.dart';
 import '../theme/app_theme.dart';
+import 'login_screen.dart';
 
 class GymSettingsScreen extends StatefulWidget {
   /// When true, only the form body is shown (no AppBar); use for embedding in dashboard Settings tab.
@@ -1169,6 +1170,11 @@ class _GymSettingsScreenState extends State<GymSettingsScreen> {
       appBar: AppBar(
         title: Text('Gym settings', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Logout',
+            onPressed: () => LoginScreen.logout(context),
+          ),
           TextButton(
             onPressed: _saving ? null : _save,
             child: _saving ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Save'),

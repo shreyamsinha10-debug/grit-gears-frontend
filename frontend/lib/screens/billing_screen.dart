@@ -552,8 +552,8 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
                     final inv = widget.invoices[i];
                     final issuedAt = inv['issued_at'];
                     final paidAt = inv['paid_at'];
-                    final issuedStr = issuedAt != null ? formatDisplayDate(parseApiDate(issuedAt.toString())) : null;
-                    final paidStr = paidAt != null ? formatDisplayDate(parseApiDate(paidAt.toString())) : null;
+                    final issuedStr = issuedAt != null ? formatDisplayDate(parseApiDateTime(issuedAt.toString())) : null;
+                    final paidStr = paidAt != null ? formatDisplayDate(parseApiDateTime(paidAt.toString())) : null;
                     return Card(
                       margin: const EdgeInsets.only(bottom: 12),
                       child: ListTile(

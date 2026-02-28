@@ -167,6 +167,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
             icon: const Icon(FontAwesomeIcons.fileExport),
             onPressed: _showExportMenu,
           ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Logout',
+            onPressed: () => LoginScreen.logout(context),
+          ),
         ],
       ),
       body: Listener(

@@ -18,6 +18,7 @@ import 'package:file_picker/file_picker.dart';
 import '../core/api_client.dart';
 import '../core/date_utils.dart';
 import '../theme/app_theme.dart';
+import 'login_screen.dart';
 
 class RegistrationScreen extends StatefulWidget {
   const RegistrationScreen({super.key});
@@ -290,6 +291,13 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
             color: AppTheme.onSurface,
           ),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Logout',
+            onPressed: () => LoginScreen.logout(context),
+          ),
+        ],
       ),
       body: Form(
         key: _formKey,
