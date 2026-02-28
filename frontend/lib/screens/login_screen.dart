@@ -352,18 +352,27 @@ class _LoginScreenState extends State<LoginScreen> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
+                  // Logo without ClipRRect to avoid hard edges, letting transparency blend
+                  Container(
+                    height: 100,
+                    width: 100,
+                    decoration: BoxDecoration(
+                      // Removed color to ensure full transparency blending with background
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                     child: Image.asset(
                       defaultLogoAsset,
-                      height: 56,
-                      width: 56,
+                      height: 100,
+                      width: 100,
                       fit: BoxFit.contain,
                       errorBuilder: (_, __, ___) => Container(
-                        height: 56,
-                        width: 56,
-                        color: AppTheme.primary.withOpacity(0.2),
-                        child: const Icon(Icons.fitness_center, color: AppTheme.primary, size: 32),
+                        height: 100,
+                        width: 100,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: const Icon(Icons.fitness_center, color: AppTheme.primary, size: 48),
                       ),
                     ),
                   ),
