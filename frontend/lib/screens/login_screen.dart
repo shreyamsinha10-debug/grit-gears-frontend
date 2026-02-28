@@ -352,27 +352,28 @@ class _LoginScreenState extends State<LoginScreen> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Logo without ClipRRect to avoid hard edges, letting transparency blend
+                  // Logo with ClipOval to crop to circle so white corners don't show
                   Container(
                     height: 100,
                     width: 100,
-                    decoration: BoxDecoration(
-                      // Removed color to ensure full transparency blending with background
-                      borderRadius: BorderRadius.circular(16),
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
                     ),
-                    child: Image.asset(
-                      defaultLogoAsset,
-                      height: 100,
-                      width: 100,
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, __, ___) => Container(
+                    child: ClipOval(
+                      child: Image.asset(
+                        defaultLogoAsset,
                         height: 100,
                         width: 100,
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(16),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          height: 100,
+                          width: 100,
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withOpacity(0.2),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.fitness_center, color: AppTheme.primary, size: 48),
                         ),
-                        child: const Icon(Icons.fitness_center, color: AppTheme.primary, size: 48),
                       ),
                     ),
                   ),
