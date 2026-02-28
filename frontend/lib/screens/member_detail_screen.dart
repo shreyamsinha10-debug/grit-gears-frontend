@@ -28,11 +28,28 @@ import 'login_screen.dart';
 
 /// Shows edit member dialog; returns updated [Member] on save, null on cancel.
 Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
+  // Fetch dynamic batches from gym settings
+  List<String> batchNames = [];
+  try {
+    final r = await ApiClient.instance.get('/gym/profile', useCache: false);
+    if (r.statusCode >= 200 && r.statusCode < 300) {
+      final data = jsonDecode(r.body) as Map<String, dynamic>;
+      final batchList = data['batches'] as List<dynamic>? ?? [];
+      batchNames = batchList
+          .map((b) => ((b as Map<String, dynamic>)['name'] as String? ?? '').trim())
+          .where((n) => n.isNotEmpty)
+          .toList();
+    }
+  } catch (_) {}
+  // Always include member's current batch so the dropdown has a valid value
+  if (m.batch.isNotEmpty && !batchNames.contains(m.batch)) batchNames.insert(0, m.batch);
+  if (batchNames.isEmpty) batchNames = ['Morning', 'Evening', 'Ladies'];
+
   final nameController = TextEditingController(text: m.name);
   final phoneController = TextEditingController(text: m.phone);
   final emailController = TextEditingController(text: m.email);
   final addressController = TextEditingController(text: m.address ?? '');
-  String batch = m.batch;
+  String batch = batchNames.contains(m.batch) ? m.batch : batchNames.first;
   String status = m.status;
   String membershipType = m.membershipType;
   String? gender = m.gender;
@@ -100,11 +117,9 @@ Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
               DropdownButtonFormField<String>(
                 value: batch,
                 decoration: const InputDecoration(labelText: 'Batch'),
-                items: const [
-                  DropdownMenuItem(value: 'Morning', child: Text('Morning')),
-                  DropdownMenuItem(value: 'Evening', child: Text('Evening')),
-                  DropdownMenuItem(value: 'Ladies', child: Text('Ladies')),
-                ],
+                items: batchNames
+                    .map((n) => DropdownMenuItem(value: n, child: Text(n)))
+                    .toList(),
                 onChanged: (v) => setDialogState(() => batch = v ?? batch),
               ),
               const SizedBox(height: 12),
