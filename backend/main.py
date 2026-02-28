@@ -1243,6 +1243,20 @@ async def reset_member_password(member_id: str, body: MemberResetPasswordBody, g
     return {"message": "Password reset successfully"}
 
 
+@app.get("/members/{member_id}/photo")
+async def get_member_photo(member_id: str, gym_id: str = Depends(get_gym_id)):
+    """Return only photo_base64 for a member. Lightweight endpoint used by list avatars."""
+    from bson import ObjectId
+    try:
+        oid = ObjectId(member_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid member ID")
+    doc = await members_collection.find_one({"_id": oid, **_gym_filter(gym_id)}, {"photo_base64": 1})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Member not found")
+    return {"photo_base64": doc.get("photo_base64")}
+
+
 @app.patch("/members/{member_id}/photo", response_model=MemberResponse)
 async def update_member_photo(member_id: str, body: PhotoUpdate, gym_id: str = Depends(get_gym_id)):
     """Upload or remove member profile picture. Both member and admin can call this. Send photo_base64: null to delete."""

@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -17,6 +18,66 @@ import '../theme/app_theme.dart';
 import '../widgets/animated_fade.dart';
 import '../widgets/skeleton_loading.dart';
 import 'attendance_report_screen.dart';
+
+// ---------------------------------------------------------------------------
+// Session-level avatar cache — each photo is fetched at most once per session.
+// Key: member ID, Value: decoded JPEG/PNG bytes (null = no photo).
+// ---------------------------------------------------------------------------
+final Map<String, Uint8List?> _avatarCache = {};
+
+/// Lazily loads and caches a member's profile photo.
+/// Shows the initial-letter placeholder until the photo arrives.
+class _MemberAvatarWidget extends StatefulWidget {
+  final String memberId;
+  final String memberName;
+  const _MemberAvatarWidget({required this.memberId, required this.memberName});
+
+  @override
+  State<_MemberAvatarWidget> createState() => _MemberAvatarWidgetState();
+}
+
+class _MemberAvatarWidgetState extends State<_MemberAvatarWidget> {
+  Uint8List? _bytes;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_avatarCache.containsKey(widget.memberId)) {
+      _bytes = _avatarCache[widget.memberId];
+    } else {
+      _fetchAvatar();
+    }
+  }
+
+  Future<void> _fetchAvatar() async {
+    try {
+      final r = await ApiClient.instance.get('/members/${widget.memberId}/photo', useCache: false);
+      if (r.statusCode == 200) {
+        final data = jsonDecode(r.body) as Map<String, dynamic>;
+        final b64 = data['photo_base64'] as String?;
+        final bytes = b64 != null && b64.isNotEmpty ? base64Decode(b64) : null;
+        _avatarCache[widget.memberId] = bytes;
+        if (mounted) setState(() => _bytes = bytes);
+        return;
+      }
+    } catch (_) {}
+    _avatarCache[widget.memberId] = null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final initial = (widget.memberName.isNotEmpty ? widget.memberName[0] : '?').toUpperCase();
+    return CircleAvatar(
+      radius: 22,
+      backgroundColor: AppTheme.primary.withOpacity(0.2),
+      foregroundColor: AppTheme.primary,
+      backgroundImage: _bytes != null ? MemoryImage(_bytes!) : null,
+      child: _bytes == null
+          ? Text(initial, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))
+          : null,
+    );
+  }
+}
 
 class Member {
   final String id;
@@ -678,18 +739,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   Row(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      CircleAvatar(
-                                        radius: 22,
-                                        backgroundColor: AppTheme.primary.withOpacity(0.2),
-                                        foregroundColor: AppTheme.primary,
-                                        backgroundImage: m.photoBase64 != null
-                                            ? MemoryImage(base64Decode(m.photoBase64!))
-                                            : null,
-                                        onBackgroundImageError: m.photoBase64 != null ? (_, __) {} : null,
-                                        child: m.photoBase64 == null
-                                            ? Text((m.name.isNotEmpty ? m.name[0] : '?').toUpperCase(), style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.primary))
-                                            : null,
-                                      ),
+                                      _MemberAvatarWidget(memberId: m.id, memberName: m.name),
                                       const SizedBox(width: 12),
                                       Expanded(
                                         child: Column(
