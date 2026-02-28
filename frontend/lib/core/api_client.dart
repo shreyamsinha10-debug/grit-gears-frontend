@@ -81,7 +81,7 @@ class ApiClient {
   static String get prefsKey => _prefsKey;
   static const Duration connectTimeout = Duration(seconds: 8);
   static const Duration receiveTimeout = Duration(seconds: 25);
-  static const Duration cacheTtl = Duration(seconds: 45);
+  static const Duration cacheTtl = Duration(seconds: 90);
 
   static const _dohUrl = 'https://dns.google/resolve';
 

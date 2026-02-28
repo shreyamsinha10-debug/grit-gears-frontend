@@ -1,12 +1,14 @@
 // Gym settings – gym_admin: gym name, logo, invoice name.
 
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../core/api_client.dart';
+import '../core/image_compression.dart';
 import '../theme/app_theme.dart';
 import 'login_screen.dart';
 
@@ -55,7 +57,8 @@ class _GymSettingsScreenState extends State<GymSettingsScreen> {
       );
       if (!mounted) return;
       if (file != null) {
-        final bytes = await file.readAsBytes();
+        Uint8List bytes = await file.readAsBytes();
+        if (bytes.length > kMaxImageBytes) bytes = compressImageToMaxBytes(bytes);
         final base64 = base64Encode(bytes);
         setState(() {
           _logoBase64 = base64;

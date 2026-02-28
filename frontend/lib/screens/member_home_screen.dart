@@ -8,6 +8,7 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -15,6 +16,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 
 import '../core/api_client.dart';
+import '../core/image_compression.dart';
 import '../core/secure_storage.dart';
 import '../widgets/skeleton_loading.dart';
 import '../widgets/attendance_stats_card.dart';
@@ -138,7 +140,8 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
   Future<String?> _pickImage() async {
     final XFile? file = await _imagePicker.pickImage(source: ImageSource.gallery, maxWidth: 1024, maxHeight: 1024, imageQuality: 85);
     if (file == null) return null;
-    final bytes = await file.readAsBytes();
+    Uint8List bytes = await file.readAsBytes();
+    if (bytes.length > kMaxImageBytes) bytes = compressImageToMaxBytes(bytes);
     return base64Encode(bytes);
   }
 
@@ -151,6 +154,8 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
       try { bytes = await File(file.path!).readAsBytes(); } catch (_) {}
     }
     if (bytes == null) return null;
+    final bytesList = Uint8List.fromList(bytes);
+    final toEncode = isCompressibleImage(bytesList) ? compressImageToMaxBytes(bytesList) : bytesList;
     const types = ['Aadhar', 'Driving Licence', 'Voter ID', 'Passport'];
     final type = await showDialog<String>(
       context: context,
@@ -164,7 +169,7 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
       ),
     );
     if (type == null) return null;
-    return (base64Encode(bytes), type);
+    return (base64Encode(toEncode), type);
   }
 
   Future<void> _updatePhoto(String? base64) async {

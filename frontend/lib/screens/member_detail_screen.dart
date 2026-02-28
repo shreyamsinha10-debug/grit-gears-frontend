@@ -8,8 +8,7 @@
 
 import 'dart:convert';
 import 'dart:io';
-
-import 'package:flutter/material.dart';
+import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -19,6 +18,7 @@ import 'package:intl/intl.dart';
 
 import '../core/api_client.dart';
 import '../core/date_utils.dart';
+import '../core/image_compression.dart';
 import '../theme/app_theme.dart';
 import '../widgets/attendance_stats_card.dart';
 import 'dashboard_screen.dart';
@@ -312,7 +312,8 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
   Future<String?> _pickImage() async {
     final XFile? file = await _imagePicker.pickImage(source: ImageSource.gallery, maxWidth: 1024, maxHeight: 1024, imageQuality: 85);
     if (file == null) return null;
-    final bytes = await file.readAsBytes();
+    Uint8List bytes = await file.readAsBytes();
+    if (bytes.length > kMaxImageBytes) bytes = compressImageToMaxBytes(bytes);
     return base64Encode(bytes);
   }
 
@@ -325,6 +326,9 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
       try { bytes = await File(file.path!).readAsBytes(); } catch (_) {}
     }
     if (bytes == null) return null;
+    final bytesList = Uint8List.fromList(bytes);
+    // Compress image ID documents (not PDF) to keep under 500 KB
+    final toEncode = isCompressibleImage(bytesList) ? compressImageToMaxBytes(bytesList) : bytesList;
     const types = ['Aadhar', 'Driving Licence', 'Voter ID', 'Passport'];
     final type = await showDialog<String>(
       context: context,
@@ -338,7 +342,7 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
       ),
     );
     if (type == null) return null;
-    return (base64Encode(bytes), type);
+    return (base64Encode(toEncode), type);
   }
 
   Future<void> _updateMemberPhoto(String? base64) async {

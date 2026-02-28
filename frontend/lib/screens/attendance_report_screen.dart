@@ -223,76 +223,6 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
     }
   }
 
-  Future<void> _showManualCheckIn() async {
-    List<Map<String, dynamic>> members = [];
-    try {
-      final r = await ApiClient.instance.get('/members', queryParameters: {'brief': 'true', 'limit': '200'}, useCache: false);
-      if (r.statusCode == 200) members = (jsonDecode(r.body) as List<dynamic>).cast<Map<String, dynamic>>();
-    } catch (_) {}
-    if (!mounted) return;
-    final todayStr = formatApiDate(DateTime.now());
-    final alreadyIds = _entries.where((e) => e.dateIst == todayStr).map((e) => e.memberId).toSet();
-    final available = members.where((m) => !alreadyIds.contains(m['id']?.toString())).toList();
-    if (available.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('All members already checked in today or no members')));
-      return;
-    }
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (ctx) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        minChildSize: 0.3,
-        maxChildSize: 0.9,
-        expand: false,
-        builder: (ctx, scrollController) => Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text('Manual Check-in – Select member', style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.w600)),
-            ),
-            Expanded(
-              child: ListView.builder(
-                controller: scrollController,
-                itemCount: available.length,
-                itemBuilder: (context, i) {
-                  final m = available[i];
-                  final name = m['name'] as String? ?? '';
-                  final id = m['id'] as String? ?? '';
-                  return ListTile(
-                    title: Text(name),
-                    subtitle: Text(m['phone']?.toString() ?? ''),
-                    trailing: FilledButton(
-                      onPressed: () async {
-                        Navigator.pop(ctx);
-                        try {
-                          final res = await ApiClient.instance.post('/attendance/check-in/$id');
-                          if (mounted) {
-                            if (res.statusCode >= 200 && res.statusCode < 300) {
-                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$name checked in')));
-                              _load();
-                              _loadSummary();
-                            } else {
-                              final body = jsonDecode(res.body);
-                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(body['detail']?.toString() ?? 'Failed')));
-                            }
-                          }
-                        } catch (e) {
-                          if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-                        }
-                      },
-                      child: const Text('Check-in'),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   static const _batchOrder = ['Morning', 'Evening', 'Ladies'];
 
   List<AttendanceEntry> _sortedByBatch() {
@@ -350,48 +280,14 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Dashboard: title, subtitle, Manual Check-in – stack on narrow
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final narrow = constraints.maxWidth < _attendanceNarrowBreakpoint;
-                  if (narrow) {
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text('Attendance', style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.onSurface)),
-                        const SizedBox(height: 4),
-                        Text('Track member check-ins and gym visits.', style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey.shade600)),
-                        const SizedBox(height: 12),
-                        FilledButton.icon(
-                          onPressed: _showManualCheckIn,
-                          icon: const Icon(Icons.person_add_alt_1, size: 20),
-                          label: const Text('Manual Check-in'),
-                          style: FilledButton.styleFrom(backgroundColor: Colors.blue, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12)),
-                        ),
-                      ],
-                    );
-                  }
-                  return Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Attendance', style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.onSurface)),
-                            const SizedBox(height: 4),
-                            Text('Track member check-ins and gym visits.', style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey.shade600)),
-                          ],
-                        ),
-                      ),
-                      FilledButton.icon(
-                        onPressed: _showManualCheckIn,
-                        icon: const Icon(Icons.person_add_alt_1, size: 20),
-                        label: const Text('Manual Check-in'),
-                        style: FilledButton.styleFrom(backgroundColor: Colors.blue, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12)),
-                      ),
-                    ],
-                  );
-                },
+              // Title and subtitle only (Manual Check-in removed)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text('Attendance', style: GoogleFonts.poppins(fontSize: 22, fontWeight: FontWeight.bold, color: AppTheme.onSurface)),
+                  const SizedBox(height: 4),
+                  Text('Track member check-ins and gym visits.', style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey.shade600)),
+                ],
               ),
               const SizedBox(height: 20),
               Row(

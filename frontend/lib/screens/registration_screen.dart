@@ -8,6 +8,7 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -17,6 +18,7 @@ import 'package:file_picker/file_picker.dart';
 
 import '../core/api_client.dart';
 import '../core/date_utils.dart';
+import '../core/image_compression.dart';
 import '../theme/app_theme.dart';
 import 'login_screen.dart';
 
@@ -90,8 +92,11 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
               'end_time': m['end_time'] as String?,
             };
           }).whereType<Map<String, dynamic>>().toList();
+          // If current _batch is not in the new list, reset to first available (or Morning if empty)
           if (_batches.isNotEmpty && !_batches.any((b) => b['name'] == _batch)) {
             _batch = _batches.first['name'] as String;
+          } else if (_batches.isEmpty) {
+            _batch = 'Morning'; // Fallback if no batches exist
           }
           _plansLoaded = true;
         });
@@ -139,7 +144,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         imageQuality: 85,
       );
       if (file == null || !mounted) return;
-      final bytes = await file.readAsBytes();
+      Uint8List bytes = await file.readAsBytes();
+      if (bytes.length > kMaxImageBytes) bytes = compressImageToMaxBytes(bytes);
       setState(() => _photoBase64 = base64Encode(bytes));
     } catch (e) {
       if (mounted) {
@@ -169,7 +175,9 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not read file')));
         return;
       }
-      setState(() => _idDocumentBase64 = base64Encode(bytes!));
+      final bytesList = Uint8List.fromList(bytes);
+      final toEncode = isCompressibleImage(bytesList) ? compressImageToMaxBytes(bytesList) : bytesList;
+      setState(() => _idDocumentBase64 = base64Encode(toEncode));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -393,13 +401,12 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                   ),
                   const SizedBox(height: 20),
                   DropdownButtonFormField<String>(
-                    value: _selectedPlanId ?? _membershipType,
+                    value: _selectedPlanId,
                     decoration: _inputDecoration('Membership Type', null),
                     dropdownColor: AppTheme.surfaceVariant,
                     style: GoogleFonts.poppins(color: AppTheme.onSurface, fontSize: 16),
                     items: [
-                      DropdownMenuItem(value: 'Regular', child: Text('Regular', style: GoogleFonts.poppins(color: AppTheme.onSurface))),
-                      DropdownMenuItem(value: 'PT', child: Text('PT', style: GoogleFonts.poppins(color: AppTheme.onSurface))),
+                      const DropdownMenuItem(value: null, child: Text('Manual (Regular/PT)')),
                       ..._plans.map((p) {
                         final id = p['id'] as String? ?? '';
                         final name = p['name'] as String? ?? '';
@@ -412,30 +419,45 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                       }),
                     ],
                     onChanged: (v) {
-                      if (v == null) return;
-                      if (v == 'Regular' || v == 'PT') {
-                        setState(() {
-                          _selectedPlanId = null;
-                          _membershipType = v;
-                        });
-                      } else {
-                        Map<String, dynamic>? found;
-                        for (final p in _plans) {
-                          if (p['id'] == v) {
-                            found = p;
-                            break;
+                      setState(() {
+                        _selectedPlanId = v;
+                        if (v != null) {
+                          // Auto-set membership type based on plan name if it contains PT
+                          final plan = _plans.firstWhere((p) => p['id'] == v, orElse: () => {});
+                          if (plan.isNotEmpty) {
+                            final name = (plan['name'] as String? ?? '').toLowerCase();
+                            if (name.contains('pt') || name.contains('personal')) {
+                              _membershipType = 'PT';
+                            } else {
+                              _membershipType = 'Regular';
+                            }
                           }
+                        } else {
+                          // Reset to default if Manual selected
+                          _membershipType = 'Regular';
                         }
-                        setState(() {
-                          _selectedPlanId = v;
-                          _membershipType = found?['name'] as String? ?? v;
-                        });
-                      }
+                      });
                     },
                   ),
+                  if (_selectedPlanId == null) ...[
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      value: _membershipType,
+                      decoration: _inputDecoration('Manual Type', null),
+                      dropdownColor: AppTheme.surfaceVariant,
+                      style: GoogleFonts.poppins(color: AppTheme.onSurface, fontSize: 16),
+                      items: [
+                        DropdownMenuItem(value: 'Regular', child: Text('Regular', style: GoogleFonts.poppins(color: AppTheme.onSurface))),
+                        DropdownMenuItem(value: 'PT', child: Text('PT', style: GoogleFonts.poppins(color: AppTheme.onSurface))),
+                      ],
+                      onChanged: (v) => setState(() => _membershipType = v ?? 'Regular'),
+                    ),
+                  ],
                   const SizedBox(height: 20),
                   DropdownButtonFormField<String>(
-                    value: _batches.isEmpty ? _batch : (_batches.any((b) => b['name'] == _batch) ? _batch : (_batches.isNotEmpty ? _batches.first['name'] as String : 'Morning')),
+                    value: _batches.isEmpty
+                        ? _batch
+                        : (_batches.any((b) => b['name'] == _batch) ? _batch : _batches.first['name'] as String),
                     decoration: _inputDecoration('Batch', null),
                     dropdownColor: AppTheme.surfaceVariant,
                     style: GoogleFonts.poppins(color: AppTheme.onSurface, fontSize: 16),

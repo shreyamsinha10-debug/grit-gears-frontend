@@ -846,9 +846,9 @@ class _FeesTabState extends State<_FeesTab> {
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      _FeeChip('Paid', paid['count'] ?? 0, paid['total_amount'] ?? 0, AppTheme.success, isSelected: _statusFilter == 'Paid', onTap: () => setState(() => _statusFilter = _statusFilter == 'Paid' ? null : 'Paid')),
-                      _FeeChip('Due', due['count'] ?? 0, due['total_amount'] ?? 0, AppTheme.primary, isSelected: _statusFilter == 'Due', onTap: () => setState(() => _statusFilter = _statusFilter == 'Due' ? null : 'Due')),
-                      _FeeChip('Overdue', overdue['count'] ?? 0, overdue['total_amount'] ?? 0, Colors.orange, isSelected: _statusFilter == 'Overdue', onTap: () => setState(() => _statusFilter = _statusFilter == 'Overdue' ? null : 'Overdue')),
+                  _FeeChip('Paid', paid['count'] ?? 0, paid['total_amount'] ?? 0, AppTheme.success, isSelected: _statusFilter == 'Paid', onTap: () => setState(() => _statusFilter = _statusFilter == 'Paid' ? null : 'Paid')),
+                  _FeeChip('Due in 7 days', due['count'] ?? 0, due['total_amount'] ?? 0, AppTheme.primary, isSelected: _statusFilter == 'Due', onTap: () => setState(() => _statusFilter = _statusFilter == 'Due' ? null : 'Due')),
+                  _FeeChip('Overdue - Need payment today', overdue['count'] ?? 0, overdue['total_amount'] ?? 0, Colors.orange, isSelected: _statusFilter == 'Overdue', onTap: () => setState(() => _statusFilter = _statusFilter == 'Overdue' ? null : 'Overdue')),
                     ],
                   )
                 : Row(
@@ -866,7 +866,7 @@ class _FeesTabState extends State<_FeesTab> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: _FeeChip(
-                          'Due',
+                          'Due in 7 days',
                           due['count'] ?? 0,
                           due['total_amount'] ?? 0,
                           AppTheme.primary,
@@ -877,7 +877,7 @@ class _FeesTabState extends State<_FeesTab> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: _FeeChip(
-                          'Overdue',
+                          'Overdue - Need payment today',
                           overdue['count'] ?? 0,
                           overdue['total_amount'] ?? 0,
                           Colors.orange,
