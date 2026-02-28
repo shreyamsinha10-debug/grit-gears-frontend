@@ -319,6 +319,8 @@ class InvoiceResponse(BaseModel):
     issued_at: datetime
     paid_at: datetime | None = None
     bill_number: str | None = None  # e.g. BILL-2026-00001
+    payment_method: str | None = None  # Cash | Online
+    notes: str | None = None
 
 
 class AttendanceRecord(BaseModel):
@@ -2437,7 +2439,21 @@ async def billing_create(body: CreateBillRequest, gym_id: str = Depends(get_gym_
         issued_at=inv_doc["issued_at"],
         paid_at=pay_dt,
         bill_number=bill_number,
+        payment_method=body.payment_method,
+        notes=body.notes,
     )
+
+
+@app.get("/billing/next-bill-number")
+async def billing_next_bill_number(gym_id: str = Depends(get_gym_id)):
+    """Preview the next bill number that will be assigned. Does not reserve it."""
+    from datetime import timezone
+    year = datetime.now(timezone.utc).year
+    count = await invoices_collection.count_documents({
+        **_gym_filter(gym_id),
+        "issued_at": {"$gte": datetime(year, 1, 1, tzinfo=timezone.utc), "$lt": datetime(year + 1, 1, 1, tzinfo=timezone.utc)},
+    })
+    return {"bill_number": f"BILL-{year}-{count + 1:05d}"}
 
 
 @app.post("/billing/issue", response_model=InvoiceResponse)
@@ -2547,6 +2563,8 @@ async def billing_history(
             issued_at=doc["issued_at"],
             paid_at=doc.get("paid_at"),
             bill_number=doc.get("bill_number"),
+            payment_method=doc.get("payment_method"),
+            notes=doc.get("notes"),
         ))
     return out
 
@@ -2585,6 +2603,8 @@ async def billing_pay(invoice_id: str, background_tasks: BackgroundTasks, gym_id
         issued_at=updated["issued_at"],
         paid_at=updated.get("paid_at"),
         bill_number=updated.get("bill_number"),
+        payment_method=updated.get("payment_method"),
+        notes=updated.get("notes"),
     )
 
 

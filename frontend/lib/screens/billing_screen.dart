@@ -1,10 +1,14 @@
 // ---------------------------------------------------------------------------
-// Billing – Create Bill (member + plans + payment) and Invoice History.
+// Billing – Create Bill and Invoice / History.
+// ---------------------------------------------------------------------------
+// Create Bill: select member → plan auto-populated → payment details → submit.
+// Invoice History: list of all paid/unpaid invoices with search and filter.
 // ---------------------------------------------------------------------------
 
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../core/api_client.dart';
@@ -71,7 +75,6 @@ class _BillingScreenState extends State<BillingScreen> with SingleTickerProvider
             Tab(text: 'Invoice / History'),
           ],
         ),
-        const SizedBox(height: 12),
         Expanded(
           child: TabBarView(
             controller: _tabController,
@@ -96,16 +99,12 @@ class _BillingScreenState extends State<BillingScreen> with SingleTickerProvider
   }
 }
 
-/// Line item for the bill (from plan or custom).
-class _BillLineItem {
-  final String description;
-  final int amount;
-  _BillLineItem({required this.description, required this.amount});
-}
+// ---------------------------------------------------------------------------
+// Create Bill Tab
+// ---------------------------------------------------------------------------
 
 class _CreateBillTab extends StatefulWidget {
   final VoidCallback onBillCreated;
-
   const _CreateBillTab({required this.onBillCreated});
 
   @override
@@ -113,14 +112,27 @@ class _CreateBillTab extends StatefulWidget {
 }
 
 class _CreateBillTabState extends State<_CreateBillTab> {
+  // Data
   List<Map<String, dynamic>> _members = [];
   List<Map<String, dynamic>> _plans = [];
   bool _loadingMembers = true;
   bool _loadingPlans = true;
+  String _previewBillNo = 'Loading...';
+
+  // Member selection
   final _memberSearchController = TextEditingController();
   Map<String, dynamic>? _selectedMember;
-  final List<_BillLineItem> _lineItems = [];
-  final _amountController = TextEditingController(text: '0');
+
+  // Line items
+  final List<Map<String, dynamic>> _items = []; // [{description, amount}]
+
+  // Add-item form
+  Map<String, dynamic>? _addPlan; // selected plan from dropdown
+  final _customDescController = TextEditingController();
+  final _customAmountController = TextEditingController();
+  bool _addingCustom = false;
+
+  // Payment
   String _paymentMethod = 'Cash';
   DateTime _paymentDate = DateTime.now();
   final _referenceController = TextEditingController();
@@ -132,15 +144,29 @@ class _CreateBillTabState extends State<_CreateBillTab> {
     super.initState();
     _loadMembers();
     _loadPlans();
+    _loadNextBillNumber();
   }
 
   @override
   void dispose() {
     _memberSearchController.dispose();
-    _amountController.dispose();
+    _customDescController.dispose();
+    _customAmountController.dispose();
     _referenceController.dispose();
     _notesController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadNextBillNumber() async {
+    try {
+      final r = await ApiClient.instance.get('/billing/next-bill-number', useCache: false);
+      if (mounted && r.statusCode == 200) {
+        final data = jsonDecode(r.body) as Map<String, dynamic>;
+        setState(() => _previewBillNo = data['bill_number'] as String? ?? '—');
+      } else if (mounted) setState(() => _previewBillNo = '—');
+    } catch (_) {
+      if (mounted) setState(() => _previewBillNo = '—');
+    }
   }
 
   Future<void> _loadMembers() async {
@@ -182,266 +208,530 @@ class _CreateBillTabState extends State<_CreateBillTab> {
     return _members.where((m) {
       final name = (m['name'] as String? ?? '').toLowerCase();
       final phone = (m['phone'] as String? ?? '').replaceAll(RegExp(r'\D'), '');
-      final searchDigits = q.replaceAll(RegExp(r'\D'), '');
-      return name.contains(q) || (searchDigits.isNotEmpty && phone.contains(searchDigits));
+      final digits = q.replaceAll(RegExp(r'\D'), '');
+      return name.contains(q) || (digits.isNotEmpty && phone.contains(digits));
     }).toList();
   }
 
-  int get _totalAmount {
-    int sum = 0;
-    for (final item in _lineItems) sum += item.amount;
-    return sum;
-  }
+  int get _total => _items.fold(0, (sum, e) => sum + ((e['amount'] as num?)?.toInt() ?? 0));
 
-  void _updateAmountFromItems() {
-    _amountController.text = _totalAmount.toString();
-  }
-
-  void _addPlanAsLineItem(Map<String, dynamic> plan) {
-    final name = plan['name'] as String? ?? 'Plan';
-    final price = int.tryParse(plan['price']?.toString() ?? '0') ?? 0;
-    if (price <= 0) return;
+  void _selectMember(Map<String, dynamic> m) {
     setState(() {
-      _lineItems.add(_BillLineItem(description: name, amount: price));
-      _updateAmountFromItems();
+      _selectedMember = m;
+      _memberSearchController.clear();
+      _items.clear();
+    });
+    // Auto-add a matching plan
+    if (_plans.isNotEmpty) {
+      final memberType = (m['membership_type'] as String? ?? '').toLowerCase();
+      Map<String, dynamic>? matched;
+      if (memberType.isNotEmpty) {
+        try {
+          matched = _plans.firstWhere(
+            (p) => (p['name'] as String? ?? '').toLowerCase().contains(memberType),
+          );
+        } catch (_) {}
+      }
+      matched ??= _plans.first;
+      final price = int.tryParse(matched['price']?.toString() ?? '0') ?? 0;
+      if (price > 0) {
+        setState(() {
+          _items.add({'description': matched!['name'] as String? ?? 'Membership Fee', 'amount': price});
+        });
+      }
+    }
+  }
+
+  void _addPlanItem() {
+    if (_addPlan == null) {
+      _showSnack('Select a plan to add');
+      return;
+    }
+    final price = int.tryParse(_addPlan!['price']?.toString() ?? '0') ?? 0;
+    setState(() {
+      _items.add({'description': _addPlan!['name'] as String? ?? 'Plan', 'amount': price});
+      _addPlan = null;
     });
   }
 
-  void _removeLineItem(int index) {
+  void _addCustomItem() {
+    final desc = _customDescController.text.trim();
+    final amt = int.tryParse(_customAmountController.text.trim()) ?? 0;
+    if (desc.isEmpty) { _showSnack('Enter a description'); return; }
+    if (amt <= 0) { _showSnack('Enter a valid amount'); return; }
     setState(() {
-      _lineItems.removeAt(index);
-      _updateAmountFromItems();
+      _items.add({'description': desc, 'amount': amt});
+      _customDescController.clear();
+      _customAmountController.clear();
+      _addingCustom = false;
     });
   }
 
   Future<void> _submitBill() async {
-    if (_selectedMember == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Select a member')));
-      return;
-    }
-    if (_lineItems.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Add at least one plan or line item')));
-      return;
-    }
-    final total = int.tryParse(_amountController.text.trim()) ?? 0;
-    if (total <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a valid amount')));
-      return;
-    }
+    if (_selectedMember == null) { _showSnack('Please select a member first'); return; }
+    if (_items.isEmpty) { _showSnack('Add at least one plan or item'); return; }
+    if (_total <= 0) { _showSnack('Total must be greater than ₹0'); return; }
+
     setState(() => _submitting = true);
     try {
       final body = jsonEncode({
         'member_id': _selectedMember!['id'],
-        'items': _lineItems.map((e) => {'description': e.description, 'amount': e.amount}).toList(),
-        'total': total,
+        'items': _items,
+        'total': _total,
         'payment_method': _paymentMethod,
         'payment_date': formatApiDate(_paymentDate),
         'reference': _referenceController.text.trim().isEmpty ? null : _referenceController.text.trim(),
         'notes': _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
       });
-      final r = await ApiClient.instance.post(
-        '/billing/create',
-        headers: {'Content-Type': 'application/json'},
-        body: body,
-      );
+      final r = await ApiClient.instance.post('/billing/create', headers: {'Content-Type': 'application/json'}, body: body);
       if (!mounted) return;
       if (r.statusCode >= 200 && r.statusCode < 300) {
-        ApiClient.instance.invalidateCache();
         final inv = jsonDecode(r.body) as Map<String, dynamic>;
-        final billNo = inv['bill_number'] as String? ?? inv['id']?.toString().substring(0, 8) ?? '';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Bill $billNo created for ₹$total')));
+        final billNo = inv['bill_number'] as String? ?? '—';
+        // Success dialog
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.check_circle_rounded, color: Colors.green, size: 64),
+                const SizedBox(height: 16),
+                Text('Bill Created!', style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(10)),
+                  child: Column(
+                    children: [
+                      _infoRow('Bill No', billNo),
+                      _infoRow('Member', _selectedMember!['name'] as String? ?? ''),
+                      _infoRow('Total', '₹$_total'),
+                      _infoRow('Method', _paymentMethod),
+                      _infoRow('Date', formatDisplayDate(_paymentDate)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+                child: const Text('Done'),
+              ),
+            ],
+          ),
+        );
+        ApiClient.instance.invalidateCache();
         widget.onBillCreated();
         setState(() {
           _submitting = false;
           _selectedMember = null;
-          _lineItems.clear();
-          _amountController.text = '0';
+          _items.clear();
           _referenceController.clear();
           _notesController.clear();
+          _paymentMethod = 'Cash';
+          _paymentDate = DateTime.now();
+          _addPlan = null;
+          _addingCustom = false;
         });
+        _loadNextBillNumber();
       } else {
-        final detail = (jsonDecode(r.body) as Map<String, dynamic>)['detail'] ?? r.body;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $detail')));
+        final detail = (jsonDecode(r.body) as Map<String, dynamic>?)?['detail'] ?? r.body;
+        _showSnack('Failed: $detail');
         setState(() => _submitting = false);
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-        setState(() => _submitting = false);
-      }
+      if (mounted) { _showSnack('Error: $e'); setState(() => _submitting = false); }
     }
   }
 
+  void _showSnack(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 3)));
+  }
+
+  Widget _infoRow(String label, String value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 3),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade600)),
+        Text(value, style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600)),
+      ],
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
-    final padding = LayoutConstants.screenPadding(context);
+    final pad = LayoutConstants.screenPadding(context);
     return SingleChildScrollView(
-      padding: EdgeInsets.all(padding),
+      padding: EdgeInsets.all(pad),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('Create Bill', style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
-          const SizedBox(height: 2),
-          Text('Bill No: —', style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade600)),
-          const SizedBox(height: 20),
-          // Select Member
-          Text('Select Member', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500)),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _memberSearchController,
-            decoration: const InputDecoration(
-              hintText: 'Search by name or phone...',
-              prefixIcon: Icon(Icons.search),
-              border: OutlineInputBorder(),
-              isDense: true,
-            ),
-            onChanged: (_) => setState(() {}),
-          ),
-          if (_selectedMember != null) ...[
-            const SizedBox(height: 8),
-            Card(
-              color: AppTheme.surfaceVariant,
-              child: ListTile(
-                title: Text(_selectedMember!['name'] ?? ''),
-                subtitle: Text(_selectedMember!['phone'] ?? ''),
-                trailing: IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => setState(() => _selectedMember = null),
+          // ── Header ──────────────────────────────────────────────────────
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Create Bill', style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.w700, color: AppTheme.onSurface)),
+                    Text('Bill No: $_previewBillNo', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
+                  ],
                 ),
               ),
-            ),
-          ] else if (_filteredMembers.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 200),
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: _filteredMembers.length,
-                itemBuilder: (context, i) {
-                  final m = _filteredMembers[i];
-                  return ListTile(
-                    title: Text(m['name'] ?? ''),
-                    subtitle: Text(m['phone'] ?? ''),
-                    onTap: () => setState(() {
-                      _selectedMember = m;
-                      _memberSearchController.clear();
-                    }),
-                  );
-                },
-              ),
-            ),
-          ] else if (!_loadingMembers)
-            Padding(padding: const EdgeInsets.all(8), child: Text('No members found', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600))),
+              Text(formatDisplayDate(DateTime.now()), style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
+            ],
+          ),
           const SizedBox(height: 20),
-          // Membership Plans
-          Text('Membership Plans', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500)),
-          const SizedBox(height: 4),
-          Text('Add one or more plans (e.g. Registration + Monthly)', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
+
+          // ── Step 1: Select Member ──────────────────────────────────────
+          _sectionLabel('1', 'Select Member'),
           const SizedBox(height: 8),
-          if (_loadingPlans)
-            const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator(color: AppTheme.primary)))
-          else if (_plans.isEmpty)
-            Padding(padding: const EdgeInsets.all(8), child: Text('No plans in gym settings', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)))
-          else
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _plans.map((p) {
-                final name = p['name'] as String? ?? '';
-                final price = int.tryParse(p['price']?.toString() ?? '0') ?? 0;
-                return FilterChip(
-                  label: Text('$name — ₹$price'),
-                  onSelected: (_) => _addPlanAsLineItem(p),
-                );
-              }).toList(),
-            ),
-          if (_lineItems.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            ..._lineItems.asMap().entries.map((e) => ListTile(
-              title: Text(e.value.description),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('₹${e.value.amount}', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-                  IconButton(icon: const Icon(Icons.remove_circle_outline, size: 20), onPressed: () => _removeLineItem(e.key)),
-                ],
+          if (_selectedMember != null) ...[
+            _memberCard(_selectedMember!),
+          ] else ...[
+            TextField(
+              controller: _memberSearchController,
+              decoration: InputDecoration(
+                hintText: _loadingMembers ? 'Loading members...' : 'Search by name or phone...',
+                prefixIcon: const Icon(Icons.search),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                isDense: true,
               ),
-            )),
+              enabled: !_loadingMembers,
+              onChanged: (_) => setState(() {}),
+            ),
+            if (_memberSearchController.text.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 220),
+                child: Card(
+                  elevation: 3,
+                  margin: EdgeInsets.zero,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  child: _filteredMembers.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Text('No members found', style: GoogleFonts.poppins(color: Colors.grey.shade600)),
+                        )
+                      : ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: _filteredMembers.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (ctx, i) {
+                            final m = _filteredMembers[i];
+                            return ListTile(
+                              dense: true,
+                              leading: CircleAvatar(
+                                radius: 18,
+                                backgroundColor: AppTheme.primary.withOpacity(0.15),
+                                child: Text((m['name'] as String? ?? '?')[0].toUpperCase(), style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
+                              ),
+                              title: Text(m['name'] as String? ?? '', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500)),
+                              subtitle: Text('${m['phone'] ?? ''} · ${m['membership_type'] ?? ''} · ${m['batch'] ?? ''}', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
+                              onTap: () => _selectMember(m),
+                            );
+                          },
+                        ),
+                ),
+              ),
+            ],
           ],
           const SizedBox(height: 20),
-          // Payment Details
+
+          // ── Step 2: Line Items ─────────────────────────────────────────
+          _sectionLabel('2', 'Plans & Items'),
+          const SizedBox(height: 8),
+          if (_selectedMember == null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text('Select a member first to add items', style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade500)),
+            )
+          else ...[
+            // Current items
+            if (_items.isNotEmpty) ...[
+              ..._items.asMap().entries.map((e) => Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                color: AppTheme.surfaceVariant,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                child: ListTile(
+                  dense: true,
+                  title: Text(e.value['description'] as String? ?? '', style: GoogleFonts.poppins(fontSize: 14)),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('₹${e.value['amount']}', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppTheme.primary)),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        icon: const Icon(Icons.remove_circle_outline, size: 20, color: Colors.red),
+                        onPressed: () => setState(() => _items.removeAt(e.key)),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),
+                ),
+              )),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Total', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 15)),
+                    Text('₹$_total', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 17, color: AppTheme.primary)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            // Add plan from list
+            if (!_loadingPlans && _plans.isNotEmpty) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<Map<String, dynamic>>(
+                      value: _addPlan,
+                      decoration: InputDecoration(
+                        hintText: 'Select plan to add...',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      ),
+                      items: _plans.map((p) {
+                        final name = p['name'] as String? ?? '';
+                        final price = int.tryParse(p['price']?.toString() ?? '0') ?? 0;
+                        return DropdownMenuItem(value: p, child: Text('$name — ₹$price', style: GoogleFonts.poppins(fontSize: 13)));
+                      }).toList(),
+                      onChanged: (v) => setState(() => _addPlan = v),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                    onPressed: _addPlanItem,
+                    style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12)),
+                    child: const Icon(Icons.add),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+            ],
+            // Add custom item
+            AnimatedCrossFade(
+              duration: const Duration(milliseconds: 200),
+              crossFadeState: _addingCustom ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+              firstChild: TextButton.icon(
+                onPressed: () => setState(() => _addingCustom = true),
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add custom item'),
+                style: TextButton.styleFrom(foregroundColor: AppTheme.primary),
+              ),
+              secondChild: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: _customDescController,
+                    decoration: InputDecoration(
+                      hintText: 'Description (e.g. Registration Fee)',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _customAmountController,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          decoration: InputDecoration(
+                            hintText: 'Amount (₹)',
+                            prefixText: '₹ ',
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: _addCustomItem,
+                        style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12)),
+                        child: const Text('Add'),
+                      ),
+                      const SizedBox(width: 4),
+                      TextButton(
+                        onPressed: () => setState(() { _addingCustom = false; _customDescController.clear(); _customAmountController.clear(); }),
+                        child: const Text('Cancel'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 20),
+
+          // ── Step 3: Payment Details ────────────────────────────────────
+          _sectionLabel('3', 'Payment Details'),
+          const SizedBox(height: 8),
           Card(
             color: AppTheme.surfaceVariant,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             child: Padding(
-              padding: EdgeInsets.all(padding),
+              padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text('Amount', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700)),
-                  TextField(
-                    controller: _amountController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(prefixText: '₹ ', border: OutlineInputBorder(), isDense: true),
-                    onChanged: (_) => setState(() {}),
+                  // Method
+                  Text('Payment Method', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: ['Cash', 'Online'].map((m) {
+                      final selected = _paymentMethod == m;
+                      return Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: OutlinedButton.icon(
+                            onPressed: () => setState(() => _paymentMethod = m),
+                            icon: Icon(m == 'Cash' ? Icons.payments_outlined : Icons.phone_android, size: 18),
+                            label: Text(m),
+                            style: OutlinedButton.styleFrom(
+                              backgroundColor: selected ? AppTheme.primary : null,
+                              foregroundColor: selected ? Colors.white : AppTheme.primary,
+                              side: BorderSide(color: AppTheme.primary),
+                              padding: const EdgeInsets.symmetric(vertical: 10),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
                   ),
-                  const SizedBox(height: 12),
-                  Text('Method', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700)),
-                  DropdownButtonFormField<String>(
-                    value: _paymentMethod,
-                    decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
-                    items: const [
-                      DropdownMenuItem(value: 'Cash', child: Text('Cash')),
-                      DropdownMenuItem(value: 'Online', child: Text('Online')),
-                    ],
-                    onChanged: (v) => setState(() => _paymentMethod = v ?? 'Cash'),
-                  ),
-                  const SizedBox(height: 12),
-                  Text('Date', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700)),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(formatDisplayDate(_paymentDate)),
-                    trailing: const Icon(Icons.calendar_today),
+                  const SizedBox(height: 14),
+                  // Date
+                  Text('Payment Date', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 6),
+                  InkWell(
                     onTap: () async {
                       final d = await showDatePicker(context: context, initialDate: _paymentDate, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365)));
                       if (d != null) setState(() => _paymentDate = d);
                     },
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade400),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_today, size: 18, color: Colors.grey),
+                          const SizedBox(width: 8),
+                          Text(formatDisplayDate(_paymentDate), style: GoogleFonts.poppins(fontSize: 14)),
+                        ],
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  Text('Reference (optional)', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700)),
+                  const SizedBox(height: 14),
+                  // Reference
+                  Text('Reference (optional)', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 6),
                   TextField(
                     controller: _referenceController,
-                    decoration: const InputDecoration(hintText: 'UPI ref, etc.', border: OutlineInputBorder(), isDense: true),
+                    decoration: InputDecoration(
+                      hintText: 'UPI ref, transaction ID, etc.',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      isDense: true,
+                    ),
                   ),
-                  const SizedBox(height: 12),
-                  Text('Total Paid: ₹${int.tryParse(_amountController.text.trim()) ?? 0}', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 14),
+                  // Notes
+                  Text('Notes (optional)', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _notesController,
+                    maxLines: 2,
+                    decoration: InputDecoration(
+                      hintText: 'e.g. July membership fee',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 16),
-          Text('Notes (Optional)', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700)),
-          TextField(
-            controller: _notesController,
-            maxLines: 2,
-            decoration: const InputDecoration(hintText: 'e.g. July Fees', border: OutlineInputBorder()),
-          ),
           const SizedBox(height: 24),
+
+          // ── Submit ────────────────────────────────────────────────────
           FilledButton.icon(
-            onPressed: _submitting ? null : _submitBill,
-            icon: _submitting ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.check),
-            label: Text('Complete Bill — ₹${int.tryParse(_amountController.text.trim()) ?? 0}.00'),
+            onPressed: (_submitting || _selectedMember == null || _items.isEmpty) ? null : _submitBill,
+            icon: _submitting
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.receipt_long_rounded),
+            label: Text(
+              _submitting
+                  ? 'Creating Bill...'
+                  : _total > 0
+                      ? 'Complete Bill — ₹$_total'
+                      : 'Complete Bill',
+              style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15),
+            ),
             style: FilledButton.styleFrom(
               backgroundColor: AppTheme.primary,
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
+          const SizedBox(height: 32),
         ],
       ),
     );
   }
+
+  Widget _memberCard(Map<String, dynamic> m) => Card(
+    color: AppTheme.primary.withOpacity(0.07),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: AppTheme.primary.withOpacity(0.3))),
+    child: ListTile(
+      leading: CircleAvatar(
+        backgroundColor: AppTheme.primary.withOpacity(0.2),
+        child: Text((m['name'] as String? ?? '?')[0].toUpperCase(), style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
+      ),
+      title: Text(m['name'] as String? ?? '', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+      subtitle: Text(
+        '${m['phone'] ?? ''} · ${m['membership_type'] ?? ''} · ${m['batch'] ?? ''}',
+        style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600),
+      ),
+      trailing: IconButton(
+        icon: const Icon(Icons.close, size: 20),
+        onPressed: () => setState(() { _selectedMember = null; _items.clear(); _addPlan = null; }),
+        tooltip: 'Change member',
+      ),
+    ),
+  );
+
+  Widget _sectionLabel(String step, String title) => Row(
+    children: [
+      CircleAvatar(
+        radius: 12,
+        backgroundColor: AppTheme.primary,
+        child: Text(step, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+      ),
+      const SizedBox(width: 8),
+      Text(title, style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
+    ],
+  );
 }
+
+// ---------------------------------------------------------------------------
+// Invoice History Tab
+// ---------------------------------------------------------------------------
 
 class _InvoiceHistoryTab extends StatefulWidget {
   final List<Map<String, dynamic>> invoices;
@@ -474,53 +764,74 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
     );
   }
 
+  void _clearFilter() {
+    setState(() { _searchController.clear(); _dateFrom = null; _dateTo = null; });
+    widget.loadInvoices();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final pad = LayoutConstants.screenPadding(context);
     return Column(
       children: [
         Padding(
-          padding: EdgeInsets.all(LayoutConstants.screenPadding(context)),
+          padding: EdgeInsets.fromLTRB(pad, pad, pad, 0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               TextField(
                 controller: _searchController,
-                decoration: const InputDecoration(
-                  hintText: 'Search by invoice # or member name',
-                  prefixIcon: Icon(Icons.search),
-                  border: OutlineInputBorder(),
+                decoration: InputDecoration(
+                  hintText: 'Search by bill # or member name',
+                  prefixIcon: const Icon(Icons.search),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                   isDense: true,
+                  suffixIcon: _searchController.text.isNotEmpty
+                      ? IconButton(icon: const Icon(Icons.clear), onPressed: () { setState(() => _searchController.clear()); _applyFilter(); })
+                      : null,
                 ),
+                onChanged: (_) => setState(() {}),
                 onSubmitted: (_) => _applyFilter(),
               ),
               const SizedBox(height: 8),
               Row(
                 children: [
-                  Text(_dateFrom != null ? formatDisplayDate(parseApiDate(_dateFrom)) : 'From', style: GoogleFonts.poppins(fontSize: 12)),
-                  TextButton(
-                    onPressed: () async {
-                      final d = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime.now());
-                      if (d != null) setState(() => _dateFrom = formatApiDate(d));
-                    },
-                    child: const Text('Date from'),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        final d = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime.now());
+                        if (d != null) setState(() => _dateFrom = formatApiDate(d));
+                      },
+                      icon: const Icon(Icons.calendar_today, size: 14),
+                      label: Text(_dateFrom != null ? formatDisplayDate(parseApiDate(_dateFrom)) : 'From date', style: GoogleFonts.poppins(fontSize: 12)),
+                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 8), side: BorderSide(color: Colors.grey.shade400)),
+                    ),
                   ),
-                  Text(_dateTo != null ? formatDisplayDate(parseApiDate(_dateTo)) : 'To', style: GoogleFonts.poppins(fontSize: 12)),
-                  TextButton(
-                    onPressed: () async {
-                      final d = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime.now());
-                      if (d != null) setState(() => _dateTo = formatApiDate(d));
-                    },
-                    child: const Text('Date to'),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        final d = await showDatePicker(context: context, initialDate: DateTime.now(), firstDate: DateTime(2020), lastDate: DateTime.now());
+                        if (d != null) setState(() => _dateTo = formatApiDate(d));
+                      },
+                      icon: const Icon(Icons.calendar_today, size: 14),
+                      label: Text(_dateTo != null ? formatDisplayDate(parseApiDate(_dateTo)) : 'To date', style: GoogleFonts.poppins(fontSize: 12)),
+                      style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 8), side: BorderSide(color: Colors.grey.shade400)),
+                    ),
                   ),
-                  const Spacer(),
-                  FilledButton(onPressed: _applyFilter, child: const Text('Apply')),
+                  const SizedBox(width: 8),
+                  FilledButton(onPressed: _applyFilter, style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)), child: const Text('Search')),
+                  if (_dateFrom != null || _dateTo != null || _searchController.text.isNotEmpty) ...[
+                    const SizedBox(width: 4),
+                    IconButton(icon: const Icon(Icons.clear, size: 18), onPressed: _clearFilter, tooltip: 'Clear filters'),
+                  ],
                 ],
               ),
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Invoices', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                  Text('${widget.invoices.length} invoice${widget.invoices.length == 1 ? '' : 's'}', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
                   TextButton.icon(
                     onPressed: () async {
                       if (!context.mounted) return;
@@ -534,8 +845,8 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Export failed. Try again.')));
                       }
                     },
-                    icon: const Icon(FontAwesomeIcons.fileExport, size: 18),
-                    label: const Text('Export all'),
+                    icon: const Icon(FontAwesomeIcons.fileExport, size: 14),
+                    label: const Text('Export'),
                   ),
                 ],
               ),
@@ -545,49 +856,129 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
         Expanded(
           child: widget.loading
               ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
-              : ListView.builder(
-                  padding: EdgeInsets.all(LayoutConstants.screenPadding(context)),
-                  itemCount: widget.invoices.length,
-                  itemBuilder: (context, i) {
-                    final inv = widget.invoices[i];
-                    final issuedAt = inv['issued_at'];
-                    final paidAt = inv['paid_at'];
-                    final issuedStr = issuedAt != null ? formatDisplayDate(parseApiDateTime(issuedAt.toString())) : null;
-                    final paidStr = paidAt != null ? formatDisplayDate(parseApiDateTime(paidAt.toString())) : null;
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: ListTile(
-                        title: Text(inv['member_name'] ?? ''),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text('₹${inv['total']} • ${inv['status']} • ${inv['bill_number'] ?? '#${inv['id']?.toString().substring(0, 8) ?? ''}'}', style: GoogleFonts.poppins(fontSize: 13)),
-                            if (issuedStr != null) Text('Issued: $issuedStr', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
-                            if (paidStr != null && inv['status'] == 'Paid') Text('Paid on: $paidStr', style: GoogleFonts.poppins(fontSize: 12, color: AppTheme.success)),
-                          ],
-                        ),
-                        trailing: inv['status'] == 'Unpaid'
-                            ? FilledButton(
-                                onPressed: () => _InvoiceHistoryTabState.showInvoiceWithQR(context, inv, widget.onRefresh),
-                                child: const Text('View / Pay'),
-                              )
-                            : null,
-                        onTap: () => _InvoiceHistoryTabState.showInvoiceWithQR(context, inv, widget.onRefresh),
+              : widget.invoices.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.receipt_long_outlined, size: 56, color: Colors.grey.shade400),
+                          const SizedBox(height: 12),
+                          Text('No invoices found', style: GoogleFonts.poppins(fontSize: 15, color: Colors.grey.shade600)),
+                          const SizedBox(height: 4),
+                          Text('Create a bill to see it here', style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade400)),
+                        ],
                       ),
-                    );
-                  },
-                ),
+                    )
+                  : RefreshIndicator(
+                      onRefresh: () async => widget.onRefresh(),
+                      child: ListView.builder(
+                        padding: EdgeInsets.all(pad),
+                        itemCount: widget.invoices.length,
+                        itemBuilder: (context, i) {
+                          final inv = widget.invoices[i];
+                          final isPaid = inv['status'] == 'Paid';
+                          final issuedAt = inv['issued_at'];
+                          final paidAt = inv['paid_at'];
+                          final paidStr = paidAt != null ? formatDisplayDate(parseApiDateTime(paidAt.toString())) : null;
+                          final billNo = inv['bill_number'] as String? ?? '#${(inv['id'] as String? ?? '').substring(0, 8)}';
+                          final method = inv['payment_method'] as String?;
+                          final notes = inv['notes'] as String?;
+                          return Card(
+                            margin: const EdgeInsets.only(bottom: 10),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(12),
+                              onTap: () => _InvoiceHistoryTabState.showInvoiceDialog(context, inv, widget.onRefresh),
+                              child: Padding(
+                                padding: const EdgeInsets.all(14),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(inv['member_name'] as String? ?? '', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15)),
+                                        ),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: isPaid ? Colors.green.shade50 : Colors.orange.shade50,
+                                            borderRadius: BorderRadius.circular(20),
+                                            border: Border.all(color: isPaid ? Colors.green.shade300 : Colors.orange.shade300),
+                                          ),
+                                          child: Text(isPaid ? 'Paid' : 'Unpaid', style: GoogleFonts.poppins(fontSize: 12, color: isPaid ? Colors.green.shade700 : Colors.orange.shade700, fontWeight: FontWeight.w600)),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Row(
+                                      children: [
+                                        Text(billNo, style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
+                                        const Spacer(),
+                                        Text('₹${inv['total']}', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.primary)),
+                                      ],
+                                    ),
+                                    if (isPaid && paidStr != null) ...[
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        children: [
+                                          Icon(Icons.check_circle_rounded, size: 14, color: Colors.green.shade600),
+                                          const SizedBox(width: 4),
+                                          Text('Paid on $paidStr${method != null ? ' · $method' : ''}', style: GoogleFonts.poppins(fontSize: 12, color: Colors.green.shade700)),
+                                        ],
+                                      ),
+                                    ] else if (!isPaid && issuedAt != null) ...[
+                                      const SizedBox(height: 4),
+                                      Text('Issued: ${formatDisplayDate(parseApiDateTime(issuedAt.toString()))}', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
+                                    ],
+                                    if (notes != null && notes.isNotEmpty) ...[
+                                      const SizedBox(height: 4),
+                                      Text(notes, style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade500, fontStyle: FontStyle.italic), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                    ],
+                                    if (!isPaid) ...[
+                                      const SizedBox(height: 10),
+                                      SizedBox(
+                                        width: double.infinity,
+                                        child: FilledButton.icon(
+                                          onPressed: () => _InvoiceHistoryTabState.showInvoiceDialog(context, inv, widget.onRefresh),
+                                          icon: const Icon(Icons.payment, size: 16),
+                                          label: const Text('View & Pay'),
+                                          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, padding: const EdgeInsets.symmetric(vertical: 10)),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
         ),
       ],
     );
   }
 
-  static void showInvoiceWithQR(BuildContext context, Map<String, dynamic> inv, VoidCallback onRefresh) {
+  static void showInvoiceDialog(BuildContext context, Map<String, dynamic> inv, VoidCallback onRefresh) {
+    final isPaid = inv['status'] == 'Paid';
+    final billNo = inv['bill_number'] as String? ?? '#${(inv['id'] as String? ?? '').substring(0, 8)}';
+    final paidAt = inv['paid_at'];
+    final paidStr = paidAt != null ? formatDisplayDate(parseApiDateTime(paidAt.toString())) : null;
+    final method = inv['payment_method'] as String?;
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Invoice • ${inv['member_name']}${inv['bill_number'] != null ? ' • ${inv['bill_number']}' : ''}'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(inv['member_name'] as String? ?? '', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 18)),
+            Text(billNo, style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade600)),
+          ],
+        ),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -598,8 +989,8 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(e['description'] ?? ''),
-                    Text('₹${e['amount']}'),
+                    Expanded(child: Text(e['description'] as String? ?? '', style: GoogleFonts.poppins(fontSize: 14))),
+                    Text('₹${e['amount']}', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500)),
                   ],
                 ),
               )),
@@ -607,22 +998,24 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Total', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-                  Text('₹${inv['total']}', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+                  Text('Total', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 15)),
+                  Text('₹${inv['total']}', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 15, color: AppTheme.primary)),
                 ],
               ),
-              if (inv['status'] == 'Unpaid') ...[
-                const SizedBox(height: 16),
-                const Center(child: Text('Simulated UPI QR', style: TextStyle(color: Colors.grey))),
+              if (isPaid && paidStr != null) ...[
                 const SizedBox(height: 8),
-                Center(
-                  child: Container(
-                    width: 120,
-                    height: 120,
-                    color: Colors.grey.shade300,
-                    child: const Icon(Icons.qr_code_2, size: 80),
-                  ),
+                Row(
+                  children: [
+                    Icon(Icons.check_circle_rounded, color: Colors.green.shade600, size: 16),
+                    const SizedBox(width: 6),
+                    Text('Paid on $paidStr${method != null ? ' via $method' : ''}', style: GoogleFonts.poppins(fontSize: 13, color: Colors.green.shade700)),
+                  ],
                 ),
+              ],
+              if (!isPaid) ...[
+                const SizedBox(height: 16),
+                const Center(child: Icon(Icons.qr_code_2, size: 80, color: Colors.grey)),
+                const Center(child: Text('Scan to pay (coming soon)', style: TextStyle(fontSize: 12, color: Colors.grey))),
               ],
             ],
           ),
@@ -633,19 +1026,15 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
               Map<String, dynamic>? gymProfile;
               try {
                 final r = await ApiClient.instance.get('/gym/profile', useCache: true);
-                if (r.statusCode >= 200 && r.statusCode < 300) {
-                  gymProfile = jsonDecode(r.body) as Map<String, dynamic>?;
-                }
+                if (r.statusCode >= 200 && r.statusCode < 300) gymProfile = jsonDecode(r.body) as Map<String, dynamic>?;
               } catch (_) {}
-              if (ctx.mounted) {
-                await PdfInvoiceHelper.generateAndPrint(inv, gymProfile: gymProfile);
-              }
+              if (ctx.mounted) await PdfInvoiceHelper.generateAndPrint(inv, gymProfile: gymProfile);
             },
-            icon: const Icon(Icons.print, size: 18),
+            icon: const Icon(Icons.print_rounded, size: 18),
             label: const Text('Print / PDF'),
           ),
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
-          if (inv['status'] == 'Unpaid')
+          if (!isPaid)
             FilledButton(
               onPressed: () async {
                 Navigator.pop(ctx);
@@ -653,9 +1042,10 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
                 if (r.statusCode >= 200 && r.statusCode < 300) {
                   ApiClient.instance.invalidateCache();
                   onRefresh();
-                  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payment recorded')));
+                  if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payment recorded successfully')));
                 }
               },
+              style: FilledButton.styleFrom(backgroundColor: Colors.green),
               child: const Text('Mark as Paid'),
             ),
         ],
