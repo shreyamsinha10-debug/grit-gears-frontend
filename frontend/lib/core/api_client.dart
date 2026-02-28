@@ -80,7 +80,7 @@ class ApiClient {
 
   static String get prefsKey => _prefsKey;
   static const Duration connectTimeout = Duration(seconds: 8);
-  static const Duration receiveTimeout = Duration(seconds: 10);
+  static const Duration receiveTimeout = Duration(seconds: 25);
   static const Duration cacheTtl = Duration(seconds: 45);
 
   static const _dohUrl = 'https://dns.google/resolve';
@@ -301,8 +301,9 @@ class ApiClient {
     final request = http.MultipartRequest('POST', uri);
     request.headers.addAll(_authHeaders(null));
     request.files.add(await http.MultipartFile.fromPath(fileField, filePath, filename: filename ?? 'file.xlsx'));
-    final streamed = await request.send();
-    return http.Response.fromStream(streamed);
+    const uploadTimeout = Duration(seconds: 60);
+    final streamed = await request.send().timeout(uploadTimeout);
+    return http.Response.fromStream(streamed).timeout(uploadTimeout);
   }
 
   Future<http.Response> delete(String path, {Map<String, String>? headers}) async {

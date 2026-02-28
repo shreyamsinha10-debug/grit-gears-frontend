@@ -175,8 +175,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     } catch (e) {
       if (!mounted) return;
+      final msg = e.toString();
+      final isTimeout = msg.contains('TimeoutException') || msg.contains('timed out');
       setState(() {
-        _error = e.toString().split('\n').first;
+        _error = isTimeout
+            ? 'Request timed out. Check your connection and that the server is running.'
+            : msg.split('\n').first;
         _loading = false;
         _loadingMore = false;
       });
