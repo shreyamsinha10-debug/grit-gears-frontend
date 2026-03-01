@@ -299,44 +299,51 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final path = file.path;
     final name = file.name;
     final bytes = file.bytes;
-    if ((path == null || path.isEmpty) && (bytes == null || bytes.isEmpty)) return;
+    if ((path == null || path.isEmpty) && (bytes == null || bytes.isEmpty)) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not read the selected file. Try again.')),
+        );
+      }
+      return;
+    }
     if (!context.mounted) return;
 
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context, rootNavigator: true);
 
-    void showProgress() {
-      showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        useRootNavigator: true,
-        builder: (ctx) => PopScope(
-          canPop: false,
-          child: AlertDialog(
-            content: Row(
-              children: [
-                const SizedBox(
-                  width: 32,
-                  height: 32,
-                  child: CircularProgressIndicator(strokeWidth: 3, color: AppTheme.primary),
+    scaffoldMessenger.showSnackBar(const SnackBar(content: Text('Importing members…'), duration: Duration(seconds: 2)));
+
+    // Show progress dialog immediately so user sees something is happening
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      useRootNavigator: true,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            children: [
+              const SizedBox(
+                width: 32,
+                height: 32,
+                child: CircularProgressIndicator(strokeWidth: 3, color: AppTheme.primary),
+              ),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Text(
+                  'Importing members…',
+                  style: GoogleFonts.poppins(fontSize: 15),
                 ),
-                const SizedBox(width: 20),
-                Expanded(
-                  child: Text(
-                    'Importing members…',
-                    style: GoogleFonts.poppins(fontSize: 15),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
-      );
-    }
+      ),
+    );
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!context.mounted) return;
-      showProgress();
-    });
+    // Let the dialog render before starting the upload
+    await Future.delayed(const Duration(milliseconds: 350));
 
     try {
       final response = await ApiClient.instance.postMultipart(
@@ -412,6 +419,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     } catch (e) {
       if (!context.mounted) return;
       navigator.pop();
+      final errorMsg = e.toString().split('\n').first;
       await showDialog<void>(
         context: context,
         useRootNavigator: true,
@@ -419,7 +427,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           title: Text('Import failed', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.red.shade700)),
           content: SingleChildScrollView(
             child: Text(
-              'Error: $e',
+              errorMsg,
               style: GoogleFonts.poppins(fontSize: 14),
             ),
           ),
@@ -432,6 +440,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ],
         ),
       );
+      // Also show snackbar so user definitely sees feedback
+      scaffoldMessenger.showSnackBar(SnackBar(content: Text('Import failed: $errorMsg'), duration: const Duration(seconds: 4)));
     }
   }
 }
