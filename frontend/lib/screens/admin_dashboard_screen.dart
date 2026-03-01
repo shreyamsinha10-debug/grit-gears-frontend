@@ -373,7 +373,16 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         if (errors.isEmpty) {
           resultMsg = 'Created: $created\nUpdated: $updated';
         } else {
-          resultMsg = 'Created: $created\nUpdated: $updated\n\n${errors.length} row(s) had errors.';
+          final buffer = StringBuffer();
+          buffer.writeln('Created: $created\nUpdated: $updated');
+          buffer.writeln();
+          buffer.writeln('${errors.length} row(s) had errors:');
+          for (final e in errors) {
+            final row = e is Map ? e['row']?.toString() : '';
+            final message = e is Map ? e['message']?.toString() ?? '' : e.toString();
+            buffer.writeln('• Row $row: $message');
+          }
+          resultMsg = buffer.toString();
         }
 
         await showDialog<void>(

@@ -2685,6 +2685,9 @@ async def import_members_excel(file: UploadFile = File(...), gym_id: str = Depen
     try:
         if fn.endswith(".csv"):
             df = pd.read_csv(BytesIO(contents), encoding="utf-8-sig")
+            # If only one column, try semicolon separator (e.g. Excel export in some locales)
+            if len(df.columns) == 1:
+                df = pd.read_csv(BytesIO(contents), encoding="utf-8-sig", sep=";")
         else:
             df = pd.read_excel(BytesIO(contents), engine="openpyxl")
     except Exception as e:
@@ -2693,19 +2696,29 @@ async def import_members_excel(file: UploadFile = File(...), gym_id: str = Depen
     if df.empty or len(df) == 0:
         return MemberImportResult(created=0, updated=0, errors=[{"row": 0, "message": "No rows in file"}])
 
-    # Normalize column names: strip, lower, spaces to underscore
-    df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
+    # Normalize column names: strip BOM/whitespace, lower, spaces to underscore
+    def _norm_col(c):
+        s = str(c).strip().lower().replace(" ", "_")
+        if s.startswith("\ufeff"):
+            s = s[1:].strip()
+        return s
+
+    df.columns = [_norm_col(c) for c in df.columns]
     # Remove parenthetical suffix from date column e.g. "date_of_birth_(mm/dd/yyyy)" -> "date_of_birth"
     df.columns = [c.split("(")[0].strip("_") if "(" in c else c for c in df.columns]
     # Map template and common variants to expected names
     col_map = {
         "full_name": "name",
+        "fullname": "name",
         "member_name": "name",
+        "name_": "name",
         "email_address": "email",
         "e-mail_id": "email",
         "email_id": "email",
         "mobile": "phone",
         "phone_number": "phone",
+        "phone_no": "phone",
+        "contact": "phone",
         "type": "membership_type",
         "member_type": "membership_type",
     }
