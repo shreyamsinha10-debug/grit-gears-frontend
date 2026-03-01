@@ -2667,31 +2667,65 @@ class MemberImportResult(BaseModel):
 
 @app.post("/members/import", response_model=MemberImportResult)
 async def import_members_excel(file: UploadFile = File(...), gym_id: str = Depends(get_gym_id)):
-    """Import members from an Excel file. Expected columns: name, phone, email (required); membership_type, batch, status, address (optional). Status should be Active/Inactive/Disabled. Rows with existing phone in this gym are updated; others are created."""
+    """Import members from CSV or Excel. CSV format: Full Name, Email address, Phone, E-mail ID, Address, Date of Birth (MM/DD/YYYY), Gender, Membership Type, Batch. Excel may use same or legacy column names. Rows with existing phone are updated; others are created."""
     from bson import ObjectId
     from datetime import timezone
     import pandas as pd
 
-    if not file.filename or not file.filename.lower().endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx)")
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file provided")
+    fn = file.filename.lower()
+    if not (fn.endswith(".csv") or fn.endswith(".xlsx")):
+        raise HTTPException(status_code=400, detail="File must be CSV or Excel (.csv, .xlsx)")
 
     contents = await file.read()
     if not contents:
         raise HTTPException(status_code=400, detail="File is empty")
 
     try:
-        df = pd.read_excel(BytesIO(contents), engine="openpyxl")
+        if fn.endswith(".csv"):
+            df = pd.read_csv(BytesIO(contents), encoding="utf-8-sig")
+        else:
+            df = pd.read_excel(BytesIO(contents), engine="openpyxl")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not read Excel: {e!s}")
+        raise HTTPException(status_code=400, detail=f"Could not read file: {e!s}")
 
     if df.empty or len(df) == 0:
         return MemberImportResult(created=0, updated=0, errors=[{"row": 0, "message": "No rows in file"}])
 
-    # Normalize column names: strip, lower
+    # Normalize column names: strip, lower, spaces to underscore
     df.columns = [str(c).strip().lower().replace(" ", "_") for c in df.columns]
-    # Map common variants to expected names
-    col_map = {"member_name": "name", "mobile": "phone", "phone_number": "phone", "email_id": "email", "type": "membership_type", "member_type": "membership_type"}
-    df.rename(columns={k: v for k, v in col_map.items() if k in df.columns}, inplace=True)
+    # Remove parenthetical suffix from date column e.g. "date_of_birth_(mm/dd/yyyy)" -> "date_of_birth"
+    df.columns = [c.split("(")[0].strip("_") if "(" in c else c for c in df.columns]
+    # Map template and common variants to expected names
+    col_map = {
+        "full_name": "name",
+        "member_name": "name",
+        "email_address": "email",
+        "e-mail_id": "email",
+        "email_id": "email",
+        "mobile": "phone",
+        "phone_number": "phone",
+        "type": "membership_type",
+        "member_type": "membership_type",
+    }
+    # Rename / coalesce columns that map to same target (e.g. multiple email columns)
+    for src, dst in col_map.items():
+        if src not in df.columns:
+            continue
+        if dst not in df.columns:
+            df[dst] = df[src]
+        else:
+            # Coalesce: use dst where non-empty, else src
+            def _str(v):
+                if v is None or (isinstance(v, float) and (v != v)): return ""
+                return str(v).strip()
+            combined = df[dst].apply(_str).replace("", None).fillna(df[src].apply(_str).replace("", None))
+            df[dst] = combined
+        if src != dst:
+            df.drop(columns=[src], inplace=True, errors="ignore")
+    if "email" not in df.columns and "e-mail_id" in df.columns:
+        df["email"] = df["e-mail_id"]
 
     required = ["name", "phone", "email"]
     created = 0
@@ -2718,27 +2752,40 @@ async def import_members_excel(file: UploadFile = File(...), gym_id: str = Depen
             if not email or "@" not in email:
                 errors.append({"row": row_num, "message": "Valid email is required"})
                 continue
-            membership_type = _cell_str(row.get("membership_type")) or "Regular"
-            if membership_type.lower() not in ("regular", "pt"):
-                membership_type = "Regular"
+            membership_type_raw = _cell_str(row.get("membership_type")) or "Regular"
+            # "Regular - Monthly" -> "Regular", "PT" -> "PT"
+            membership_type = "PT" if membership_type_raw.lower().strip() == "pt" else "Regular"
             batch = _cell_str(row.get("batch")) or "Morning"
             status = _cell_str(row.get("status")) or "Active"
             if status not in ("Active", "Inactive", "Disabled"):
                 status = "Active"
-            address = _cell_str(row.get("address"))
+            address = _cell_str(row.get("address")) or None
+            if address == "":
+                address = None
+            gender = _cell_str(row.get("gender")) or None
+            if gender == "":
+                gender = None
+            date_of_birth = _parse_import_date(_cell_str(row.get("date_of_birth")))
 
             existing = await members_collection.find_one({**gym_filter, "phone": phone})
+            set_fields = {
+                "name": name[:200],
+                "email": email,
+                "membership_type": membership_type,
+                "batch": batch[:120],
+                "status": status,
+            }
+            if address is not None:
+                set_fields["address"] = address[:500]
+            if gender is not None:
+                set_fields["gender"] = gender.strip()[:50]
+            if date_of_birth is not None:
+                set_fields["date_of_birth"] = date_of_birth
+
             if existing:
                 await members_collection.update_one(
                     {"_id": existing["_id"]},
-                    {"$set": {
-                        "name": name[:200],
-                        "email": email,
-                        "membership_type": membership_type,
-                        "batch": batch[:120],
-                        "status": status,
-                        **({"address": address[:500]} if address is not None else {}),
-                    }},
+                    {"$set": set_fields},
                 )
                 updated += 1
             else:
@@ -2751,7 +2798,9 @@ async def import_members_excel(file: UploadFile = File(...), gym_id: str = Depen
                     "status": status,
                     "gym_id": gym_id,
                     "created_at": datetime.now(timezone.utc),
-                    "address": address[:500] if address else None,
+                    "address": set_fields.get("address"),
+                    "gender": set_fields.get("gender"),
+                    "date_of_birth": set_fields.get("date_of_birth"),
                 }
                 result = await members_collection.insert_one(doc)
                 mid = str(result.inserted_id)
@@ -2766,6 +2815,19 @@ async def import_members_excel(file: UploadFile = File(...), gym_id: str = Depen
             errors.append({"row": row_num, "message": str(e)[:200]})
 
     return MemberImportResult(created=created, updated=updated, errors=errors)
+
+
+def _parse_import_date(s: str):
+    """Parse date from CSV/Excel. Supports MM/DD/YYYY, MM-DD-YYYY, DD-MM-YYYY."""
+    if not s or not str(s).strip():
+        return None
+    s = str(s).strip()
+    for fmt in ("%m/%d/%Y", "%m-%d-%Y", "%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 def _cell_str(v):

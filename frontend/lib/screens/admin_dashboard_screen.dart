@@ -291,7 +291,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Future<void> _importMembers() async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['xlsx'],
+      allowedExtensions: ['csv', 'xlsx'],
       withData: false,
     );
     if (result == null || result.files.isEmpty || result.files.single.path == null) return;
@@ -717,10 +717,13 @@ class _MembersTabState extends State<_MembersTab> {
               ),
               if (widget.onImportPressed != null) ...[
                 const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: widget.onImportPressed,
-                  icon: const Icon(FontAwesomeIcons.fileImport, size: 18),
-                  label: const Text('Import Members'),
+                Tooltip(
+                  message: 'CSV/Excel columns: Full Name, Email address, Phone, E-mail ID, Address, Date of Birth (MM/DD/YYYY), Gender, Membership Type, Batch',
+                  child: OutlinedButton.icon(
+                    onPressed: widget.onImportPressed,
+                    icon: const Icon(FontAwesomeIcons.fileImport, size: 18),
+                    label: const Text('Import Members'),
+                  ),
                 ),
               ],
             ],
@@ -750,10 +753,13 @@ class _MembersTabState extends State<_MembersTab> {
               ),
               if (widget.onImportPressed != null) ...[
                 const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: widget.onImportPressed,
-                  icon: const Icon(FontAwesomeIcons.fileImport, size: 18),
-                  label: const Text('Import Members'),
+                Tooltip(
+                  message: 'CSV/Excel: Full Name, Email address, Phone, E-mail ID, Address, DOB (MM/DD/YYYY), Gender, Membership Type, Batch',
+                  child: OutlinedButton.icon(
+                    onPressed: widget.onImportPressed,
+                    icon: const Icon(FontAwesomeIcons.fileImport, size: 18),
+                    label: const Text('Import Members'),
+                  ),
                 ),
               ],
             ],
@@ -847,8 +853,8 @@ class _FeesTabState extends State<_FeesTab> {
                     runSpacing: 8,
                     children: [
                   _FeeChip('Paid', paid['count'] ?? 0, paid['total_amount'] ?? 0, AppTheme.success, isSelected: _statusFilter == 'Paid', onTap: () => setState(() => _statusFilter = _statusFilter == 'Paid' ? null : 'Paid')),
-                  _FeeChip('Due in 7 days', due['count'] ?? 0, due['total_amount'] ?? 0, AppTheme.primary, isSelected: _statusFilter == 'Due', onTap: () => setState(() => _statusFilter = _statusFilter == 'Due' ? null : 'Due')),
-                  _FeeChip('Overdue - Need Immediate Payment', overdue['count'] ?? 0, overdue['total_amount'] ?? 0, Colors.orange, isSelected: _statusFilter == 'Overdue', onTap: () => setState(() => _statusFilter = _statusFilter == 'Overdue' ? null : 'Overdue')),
+                  _FeeChip('Due', due['count'] ?? 0, due['total_amount'] ?? 0, AppTheme.primary, subtitle: 'Due in 7 days', isSelected: _statusFilter == 'Due', onTap: () => setState(() => _statusFilter = _statusFilter == 'Due' ? null : 'Due')),
+                  _FeeChip('Overdue', overdue['count'] ?? 0, overdue['total_amount'] ?? 0, Colors.orange, subtitle: 'Need immediate payment', isSelected: _statusFilter == 'Overdue', onTap: () => setState(() => _statusFilter = _statusFilter == 'Overdue' ? null : 'Overdue')),
                     ],
                   )
                 : Row(
@@ -866,10 +872,11 @@ class _FeesTabState extends State<_FeesTab> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: _FeeChip(
-                          'Due in 7 days',
+                          'Due',
                           due['count'] ?? 0,
                           due['total_amount'] ?? 0,
                           AppTheme.primary,
+                          subtitle: 'Due in 7 days',
                           isSelected: _statusFilter == 'Due',
                           onTap: () => setState(() => _statusFilter = _statusFilter == 'Due' ? null : 'Due'),
                         ),
@@ -877,10 +884,11 @@ class _FeesTabState extends State<_FeesTab> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: _FeeChip(
-                          'Overdue - Need Immediate Payment',
+                          'Overdue',
                           overdue['count'] ?? 0,
                           overdue['total_amount'] ?? 0,
                           Colors.orange,
+                          subtitle: 'Need immediate payment',
                           isSelected: _statusFilter == 'Overdue',
                           onTap: () => setState(() => _statusFilter = _statusFilter == 'Overdue' ? null : 'Overdue'),
                         ),
@@ -1013,13 +1021,14 @@ class _FeesTabState extends State<_FeesTab> {
 
 class _FeeChip extends StatelessWidget {
   final String label;
+  final String? subtitle;
   final int count;
   final int amount;
   final Color color;
   final bool isSelected;
   final VoidCallback? onTap;
 
-  const _FeeChip(this.label, this.count, this.amount, this.color, {this.isSelected = false, this.onTap});
+  const _FeeChip(this.label, this.count, this.amount, this.color, {this.subtitle, this.isSelected = false, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1030,12 +1039,17 @@ class _FeeChip extends StatelessWidget {
         side: BorderSide(color: color, width: isSelected ? 2 : 1),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(label, style: GoogleFonts.poppins(color: color, fontWeight: FontWeight.w600)),
-            const SizedBox(height: 4),
+            Text(label, style: GoogleFonts.poppins(color: color, fontWeight: FontWeight.w700, fontSize: 15)),
+            if (subtitle != null && subtitle!.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(subtitle!, style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 11)),
+            ],
+            const SizedBox(height: 6),
             Text('$count', style: GoogleFonts.poppins(color: AppTheme.onSurface, fontSize: 20, fontWeight: FontWeight.bold)),
             Text('₹$amount', style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 12)),
           ],
