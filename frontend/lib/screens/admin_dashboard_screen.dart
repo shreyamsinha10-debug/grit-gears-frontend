@@ -292,49 +292,62 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['csv', 'xlsx'],
-      withData: false,
+      withData: true,
     );
-    if (result == null || result.files.isEmpty || result.files.single.path == null) return;
-    final path = result.files.single.path!;
-    final name = result.files.single.name;
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.single;
+    final path = file.path;
+    final name = file.name;
+    final bytes = file.bytes;
+    if ((path == null || path.isEmpty) && (bytes == null || bytes.isEmpty)) return;
     if (!context.mounted) return;
 
-    // Show modal progress so user sees import is running
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => PopScope(
-        canPop: false,
-        child: AlertDialog(
-          content: Row(
-            children: [
-              const SizedBox(
-                width: 32,
-                height: 32,
-                child: CircularProgressIndicator(strokeWidth: 3, color: AppTheme.primary),
-              ),
-              const SizedBox(width: 20),
-              Expanded(
-                child: Text(
-                  'Importing members…',
-                  style: GoogleFonts.poppins(fontSize: 15),
+    final navigator = Navigator.of(context, rootNavigator: true);
+
+    void showProgress() {
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        useRootNavigator: true,
+        builder: (ctx) => PopScope(
+          canPop: false,
+          child: AlertDialog(
+            content: Row(
+              children: [
+                const SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: CircularProgressIndicator(strokeWidth: 3, color: AppTheme.primary),
                 ),
-              ),
-            ],
+                const SizedBox(width: 20),
+                Expanded(
+                  child: Text(
+                    'Importing members…',
+                    style: GoogleFonts.poppins(fontSize: 15),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-      ),
-    );
+      );
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!context.mounted) return;
+      showProgress();
+    });
 
     try {
       final response = await ApiClient.instance.postMultipart(
         '/members/import',
         fileField: 'file',
         filePath: path,
+        fileBytes: bytes,
         filename: name,
       );
       if (!context.mounted) return;
-      if (Navigator.canPop(context)) Navigator.of(context).pop(); // close progress dialog
+      navigator.pop();
 
       Map<String, dynamic>? body;
       try {
@@ -356,8 +369,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           resultMsg = 'Created: $created\nUpdated: $updated\n\n${errors.length} row(s) had errors.';
         }
 
-        await showDialog(
+        await showDialog<void>(
           context: context,
+          useRootNavigator: true,
           builder: (ctx) => AlertDialog(
             title: Text('Import complete', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
             content: SingleChildScrollView(
@@ -374,8 +388,9 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         );
       } else {
         final detail = body?['detail'] ?? response.body;
-        await showDialog(
+        await showDialog<void>(
           context: context,
+          useRootNavigator: true,
           builder: (ctx) => AlertDialog(
             title: Text('Import failed', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.red.shade700)),
             content: SingleChildScrollView(
@@ -396,9 +411,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       }
     } catch (e) {
       if (!context.mounted) return;
-      if (Navigator.canPop(context)) Navigator.of(context).pop();
-      await showDialog(
+      navigator.pop();
+      await showDialog<void>(
         context: context,
+        useRootNavigator: true,
         builder: (ctx) => AlertDialog(
           title: Text('Import failed', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.red.shade700)),
           content: SingleChildScrollView(

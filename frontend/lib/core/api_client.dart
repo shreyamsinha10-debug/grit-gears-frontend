@@ -295,12 +295,20 @@ class ApiClient {
     }
   }
 
-  /// For multipart file upload (e.g. import Excel).
-  Future<http.Response> postMultipart(String path, {required String fileField, required String filePath, String? filename}) async {
+  /// For multipart file upload (e.g. import Excel/CSV).
+  /// Prefer [fileBytes] when available (e.g. from file_picker with withData: true) so the file is read in memory and works on all platforms; otherwise uses [filePath].
+  Future<http.Response> postMultipart(String path, {required String fileField, String? filePath, List<int>? fileBytes, String? filename}) async {
     final uri = Uri.parse(baseUrl + path);
     final request = http.MultipartRequest('POST', uri);
     request.headers.addAll(_authHeaders(null));
-    request.files.add(await http.MultipartFile.fromPath(fileField, filePath, filename: filename ?? 'file.xlsx'));
+    final String fname = filename ?? filePath?.split(RegExp(r'[/\\]')).last ?? 'file.csv';
+    if (fileBytes != null && fileBytes.isNotEmpty) {
+      request.files.add(http.MultipartFile.fromBytes(fileField, fileBytes, filename: fname));
+    } else if (filePath != null && filePath.isNotEmpty) {
+      request.files.add(await http.MultipartFile.fromPath(fileField, filePath, filename: fname));
+    } else {
+      throw StateError('postMultipart: provide filePath or fileBytes');
+    }
     const uploadTimeout = Duration(seconds: 60);
     final streamed = await request.send().timeout(uploadTimeout);
     return http.Response.fromStream(streamed).timeout(uploadTimeout);
