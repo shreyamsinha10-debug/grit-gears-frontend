@@ -2636,21 +2636,24 @@ async def export_billing_excel(gym_id: str = Depends(get_gym_id)):
 
 @app.get("/export/members")
 async def export_members_excel(gym_id: str = Depends(get_gym_id)):
-    """Export members list to Excel."""
+    """Export members list to Excel. Column names match the import template (Full Name, Phone, E-mail ID, Address, Date of Birth, Gender, Membership Type, Batch, Status) so the file can be re-imported."""
     import pandas as pd
     q = _gym_filter(gym_id)
     cursor = members_collection.find(q).sort("created_at", -1)
     rows = []
     async for doc in cursor:
+        dob = _to_date(doc.get("date_of_birth"))
+        dob_str = dob.strftime("%d-%m-%Y") if dob else ""
         rows.append({
-            "id": str(doc["_id"]),
-            "name": doc.get("name", ""),
-            "phone": doc.get("phone", ""),
-            "email": doc.get("email", ""),
-            "membership_type": doc.get("membership_type", ""),
-            "batch": doc.get("batch", ""),
-            "status": doc.get("status", ""),
-            "last_attendance_date": str(_to_date(doc.get("last_attendance_date")) or ""),
+            "Full Name": doc.get("name", ""),
+            "Phone": doc.get("phone", ""),
+            "E-mail ID": doc.get("email", ""),
+            "Address": doc.get("address", ""),
+            "Date of Birth (MM/DD/YYYY)": dob_str,
+            "Gender": doc.get("gender", ""),
+            "Membership Type": doc.get("membership_type", ""),
+            "Batch": doc.get("batch", ""),
+            "Status": doc.get("status", ""),
         })
     df = pd.DataFrame(rows)
     buf = BytesIO()
@@ -2669,7 +2672,7 @@ class MemberImportResult(BaseModel):
 async def import_members_excel(file: UploadFile = File(...), gym_id: str = Depends(get_gym_id)):
     """Import members from CSV or Excel. CSV format: Full Name, Email address, Phone, E-mail ID, Address, Date of Birth (MM/DD/YYYY), Gender, Membership Type, Batch. Excel may use same or legacy column names. Rows with existing phone are updated; others are created."""
     from bson import ObjectId
-    from datetime import timezone
+    from datetime import time, timezone
     import pandas as pd
 
     if not file.filename:
@@ -2793,7 +2796,8 @@ async def import_members_excel(file: UploadFile = File(...), gym_id: str = Depen
             if gender is not None:
                 set_fields["gender"] = gender.strip()[:50]
             if date_of_birth is not None:
-                set_fields["date_of_birth"] = date_of_birth
+                # MongoDB expects datetime, not date
+                set_fields["date_of_birth"] = datetime.combine(date_of_birth, time.min)
 
             if existing:
                 await members_collection.update_one(
@@ -2813,7 +2817,7 @@ async def import_members_excel(file: UploadFile = File(...), gym_id: str = Depen
                     "created_at": datetime.now(timezone.utc),
                     "address": set_fields.get("address"),
                     "gender": set_fields.get("gender"),
-                    "date_of_birth": set_fields.get("date_of_birth"),
+                    "date_of_birth": datetime.combine(date_of_birth, time.min) if date_of_birth is not None else None,
                 }
                 result = await members_collection.insert_one(doc)
                 mid = str(result.inserted_id)
