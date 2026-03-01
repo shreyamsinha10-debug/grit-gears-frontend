@@ -298,7 +298,34 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final path = result.files.single.path!;
     final name = result.files.single.name;
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Importing members…')));
+
+    // Show modal progress so user sees import is running
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            children: [
+              const SizedBox(
+                width: 32,
+                height: 32,
+                child: CircularProgressIndicator(strokeWidth: 3, color: AppTheme.primary),
+              ),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Text(
+                  'Importing members…',
+                  style: GoogleFonts.poppins(fontSize: 15),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
     try {
       final response = await ApiClient.instance.postMultipart(
         '/members/import',
@@ -307,25 +334,88 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         filename: name,
       );
       if (!context.mounted) return;
-      final body = jsonDecode(response.body);
-      if (response.statusCode >= 200 && response.statusCode < 300) {
+      if (Navigator.canPop(context)) Navigator.of(context).pop(); // close progress dialog
+
+      Map<String, dynamic>? body;
+      try {
+        body = jsonDecode(response.body) as Map<String, dynamic>?;
+      } catch (_) {
+        body = null;
+      }
+
+      if (response.statusCode >= 200 && response.statusCode < 300 && body != null) {
         final created = body['created'] as int? ?? 0;
         final updated = body['updated'] as int? ?? 0;
         final errors = body['errors'] as List<dynamic>? ?? [];
-        String msg = 'Imported: $created created, $updated updated.';
-        if (errors.isNotEmpty) {
-          final first = errors.take(3).map((e) => 'Row ${e['row']}: ${e['message']}').join('; ');
-          msg += ' ${errors.length} error(s): $first';
-        }
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), duration: const Duration(seconds: 4)));
         setState(() => _membersRefreshKey++);
+
+        final String resultMsg;
+        if (errors.isEmpty) {
+          resultMsg = 'Created: $created\nUpdated: $updated';
+        } else {
+          resultMsg = 'Created: $created\nUpdated: $updated\n\n${errors.length} row(s) had errors.';
+        }
+
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text('Import complete', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+            content: SingleChildScrollView(
+              child: Text(resultMsg, style: GoogleFonts.poppins(fontSize: 14)),
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
       } else {
-        final detail = body['detail'] ?? response.body;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Import failed: $detail')));
+        final detail = body?['detail'] ?? response.body;
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Text('Import failed', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.red.shade700)),
+            content: SingleChildScrollView(
+              child: Text(
+                detail is String ? detail : detail.toString(),
+                style: GoogleFonts.poppins(fontSize: 14),
+              ),
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx),
+                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
       }
     } catch (e) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Import failed: $e')));
+      if (Navigator.canPop(context)) Navigator.of(context).pop();
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Import failed', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.red.shade700)),
+          content: SingleChildScrollView(
+            child: Text(
+              'Error: $e',
+              style: GoogleFonts.poppins(fontSize: 14),
+            ),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
     }
   }
 }
@@ -1044,11 +1134,21 @@ class _FeeChip extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(label, style: GoogleFonts.poppins(color: color, fontWeight: FontWeight.w700, fontSize: 15)),
-            if (subtitle != null && subtitle!.isNotEmpty) ...[
-              const SizedBox(height: 2),
-              Text(subtitle!, style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 11)),
-            ],
+            // Fixed-height header so all chips are same height (title + optional subtitle)
+            SizedBox(
+              height: 40,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(label, style: GoogleFonts.poppins(color: color, fontWeight: FontWeight.w700, fontSize: 15)),
+                  if (subtitle != null && subtitle!.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(subtitle!, style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ],
+                ],
+              ),
+            ),
             const SizedBox(height: 6),
             Text('$count', style: GoogleFonts.poppins(color: AppTheme.onSurface, fontSize: 20, fontWeight: FontWeight.bold)),
             Text('₹$amount', style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 12)),
