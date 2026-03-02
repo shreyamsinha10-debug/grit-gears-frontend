@@ -40,8 +40,17 @@ class PdfInvoiceHelper {
             ? (gymProfile['invoice_name'] as String).trim()
             : (gymProfile['name'] as String?)?.trim() ?? defaultGymName)
         : defaultGymName;
-    final gymContact = gymProfile?['phone']?.toString() ?? gymProfile?['contact']?.toString() ?? '';
-    final gymEmail = gymProfile?['email']?.toString() ?? '';
+    final gymPhone = (gymProfile?['phone']?.toString() ?? '').trim();
+    final gymEmail = (gymProfile?['email']?.toString() ?? '').trim();
+    final gymAddressLine1 = (gymProfile?['address_line1']?.toString() ?? '').trim();
+    final gymAddressLine2 = (gymProfile?['address_line2']?.toString() ?? '').trim();
+    final gymCity = (gymProfile?['city']?.toString() ?? '').trim();
+    final gymState = (gymProfile?['state']?.toString() ?? '').trim();
+    final gymPin = (gymProfile?['pin_code']?.toString() ?? '').trim();
+    final termsRaw = (gymProfile?['terms_and_conditions']?.toString() ?? '').trim();
+    final termsLines = termsRaw.isEmpty
+        ? <String>['1. Membership fees are non-refundable.', '2. This invoice is valid for the period mentioned.', '3. For queries, please contact the gym.']
+        : termsRaw.split(RegExp(r'\r?\n')).map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
 
     final billNo = invoice['bill_number']?.toString() ?? 'BILL-${invoice['id']?.toString().substring(0, 8) ?? ''}';
     final dateStr = invoice['issued_at'] != null
@@ -103,8 +112,13 @@ class PdfInvoiceHelper {
                       children: [
                         pw.Text('From', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: grey)),
                         pw.SizedBox(height: 4),
-                        pw.Text(gymName, style: const pw.TextStyle(fontSize: 10)),
-                        if (gymContact.isNotEmpty) pw.Text(gymContact, style: const pw.TextStyle(fontSize: 9)),
+                        pw.Text(gymName, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                        if (gymAddressLine1.isNotEmpty) pw.Text(gymAddressLine1, style: const pw.TextStyle(fontSize: 9)),
+                        if (gymAddressLine2.isNotEmpty) pw.Text(gymAddressLine2, style: const pw.TextStyle(fontSize: 9)),
+                        if (gymCity.isNotEmpty || gymState.isNotEmpty || gymPin.isNotEmpty)
+                          pw.Text([gymCity, gymState, gymPin].where((s) => s.isNotEmpty).join(', '), style: const pw.TextStyle(fontSize: 9)),
+                        if (gymPhone.isNotEmpty) pw.SizedBox(height: 2),
+                        if (gymPhone.isNotEmpty) pw.Text('Ph: $gymPhone', style: const pw.TextStyle(fontSize: 9)),
                         if (gymEmail.isNotEmpty) pw.Text(gymEmail, style: const pw.TextStyle(fontSize: 9)),
                       ],
                     ),
@@ -207,16 +221,17 @@ class PdfInvoiceHelper {
                 ),
               pw.SizedBox(height: 24),
 
-              // ── Footer notes ─────────────────────────────────────────────
+              // ── Footer: terms and conditions (from gym settings) ───────
               pw.Container(
                 padding: const pw.EdgeInsets.all(10),
                 decoration: pw.BoxDecoration(border: pw.Border.all(color: grey, width: 0.3)),
                 child: pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
-                    pw.Text('1. Membership fees are non-refundable.', style: pw.TextStyle(fontSize: 8, color: grey)),
-                    pw.Text('2. This invoice is valid for the period mentioned.', style: pw.TextStyle(fontSize: 8, color: grey)),
-                    pw.Text('3. For queries, please contact the gym.', style: pw.TextStyle(fontSize: 8, color: grey)),
+                    ...termsLines.map((line) => pw.Padding(
+                      padding: const pw.EdgeInsets.only(bottom: 3),
+                      child: pw.Text(line, style: pw.TextStyle(fontSize: 8, color: grey)),
+                    )),
                     pw.SizedBox(height: 6),
                     pw.Text('This is a computer generated invoice.', style: pw.TextStyle(fontSize: 8, color: grey, fontStyle: pw.FontStyle.italic)),
                   ],

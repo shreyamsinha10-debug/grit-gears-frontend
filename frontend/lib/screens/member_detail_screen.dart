@@ -1048,17 +1048,20 @@ class _PaymentsTab extends StatelessWidget {
             final paidAt = p['paid_at'];
             final paidDateStr = paidAt != null ? formatDisplayDate(parseApiDateTime(paidAt.toString())) : null;
             final isPaid = p['status'] == 'Paid';
+            final periodLabel = p['period'] ?? (p['fee_type'] == 'registration' ? 'Registration' : (p['fee_type'] ?? '—'));
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
               child: ListTile(
-                title: Text('${p['fee_type']} • ${p['period'] ?? 'Registration'}', style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
+                title: Text('${p['fee_type']} • $periodLabel', style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text('₹${p['amount']}', style: GoogleFonts.poppins(color: AppTheme.primary)),
-                    if (isPaid && paidDateStr != null)
-                      Text('Paid on $paidDateStr', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
+                    Text(
+                      isPaid && paidDateStr != null ? 'Received: $paidDateStr' : (isPaid ? 'Received: —' : 'Due'),
+                      style: GoogleFonts.poppins(fontSize: 13, color: isPaid && paidDateStr != null ? AppTheme.primary : Colors.grey.shade600),
+                    ),
                   ],
                 ),
               ),

@@ -394,6 +394,8 @@ class GymProfileResponse(BaseModel):
     city: str | None = None
     state: str | None = None
     pin_code: str | None = None
+    phone: str | None = None
+    terms_and_conditions: str | None = None
     batches: list[dict] | None = None  # [{ "id", "name", "description", "start_time", "end_time" }]
     plans: list[dict] | None = None  # Membership plans: id, name, description, price, duration_type, is_active, registration_fee, waive_registration_fee
 
@@ -429,6 +431,8 @@ class GymProfileUpdate(BaseModel):
     city: str | None = None
     state: str | None = None
     pin_code: str | None = None
+    phone: str | None = None
+    terms_and_conditions: str | None = None
     batches: list[GymBatchItem] | None = None  # Full replace of gym's batches
     plans: list[GymMembershipPlanItem] | None = None  # Full replace of gym's membership plans
 
@@ -717,6 +721,8 @@ async def get_gym_profile(gym_id: str = Depends(get_gym_id)):
         city=gym.get("city"),
         state=gym.get("state"),
         pin_code=gym.get("pin_code"),
+        phone=gym.get("phone"),
+        terms_and_conditions=gym.get("terms_and_conditions"),
         batches=batches_serialized,
         plans=plans_serialized,
     )
@@ -757,6 +763,10 @@ async def update_gym_profile(body: GymProfileUpdate, gym_id: str = Depends(get_g
         set_fields["state"] = (body.state or "").strip() or None
     if body.pin_code is not None:
         set_fields["pin_code"] = (body.pin_code or "").strip() or None
+    if body.phone is not None:
+        set_fields["phone"] = (body.phone or "").strip() or None
+    if body.terms_and_conditions is not None:
+        set_fields["terms_and_conditions"] = (body.terms_and_conditions or "").strip() or None
     if body.batches is not None:
         batches_out = []
         for b in body.batches:
@@ -819,6 +829,8 @@ async def update_gym_profile(body: GymProfileUpdate, gym_id: str = Depends(get_g
         city=updated.get("city"),
         state=updated.get("state"),
         pin_code=updated.get("pin_code"),
+        phone=updated.get("phone"),
+        terms_and_conditions=updated.get("terms_and_conditions"),
         batches=[{"id": b.get("id", ""), "name": b.get("name", ""), "description": b.get("description"), "start_time": b.get("start_time"), "end_time": b.get("end_time")} for b in batches],
         plans=plans_ser,
     )
@@ -973,20 +985,13 @@ async def create_member(member: MemberCreate, gym_id: str = Depends(get_gym_id))
     mid = str(result.inserted_id)
     doc["_id"] = result.inserted_id
 
-    # Create registration fee (Due) and first period fee (Due)
+    # Create first period fee only (no automatic registration; gyms add registration via plan/invoice if needed)
     today = today_ist()
     due_dt = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
     period = today.strftime("%Y-%m")
     if plan:
-        reg_amount = 0
-        if not plan.get("waive_registration_fee", False):
-            reg_amount = int(plan.get("registration_fee") or 0)
-            if reg_amount <= 0:
-                reg_amount = REGISTRATION_FEE  # fallback default
         plan_price = int(plan.get("price", 0))
         payments_to_insert = []
-        if reg_amount > 0:
-            payments_to_insert.append({"member_id": mid, "member_name": doc["name"], "amount": reg_amount, "fee_type": "registration", "period": None, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id})
         if plan.get("duration_type") == "one_time":
             if plan_price > 0:
                 payments_to_insert.append({"member_id": mid, "member_name": doc["name"], "amount": plan_price, "fee_type": "monthly", "period": period, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id})
@@ -998,7 +1003,6 @@ async def create_member(member: MemberCreate, gym_id: str = Depends(get_gym_id))
     else:
         monthly_amount = MONTHLY_FEE_PT if mt == "PT" else MONTHLY_FEE_REGULAR
         await payments_collection.insert_many([
-            {"member_id": mid, "member_name": doc["name"], "amount": REGISTRATION_FEE, "fee_type": "registration", "period": None, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id},
             {"member_id": mid, "member_name": doc["name"], "amount": monthly_amount, "fee_type": "monthly", "period": period, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id},
         ])
     _notify_registration(doc["name"], doc["email"], doc["phone"])
@@ -2446,7 +2450,22 @@ async def billing_create(body: CreateBillRequest, gym_id: str = Depends(get_gym_
         except Exception:
             pass  # ignore invalid end_date
     inv_result = await invoices_collection.insert_one(inv_doc)
-    # Sync payments: when a bill is created as Paid, mark member's Due/Overdue payments (up to invoice total) as Paid so member Payments tab reflects automatically
+    # Sync payments: create one payment row per invoice line item so Member Payments tab reflects the bill
+    member_name = member.get("name", "")
+    for it in items:
+        await payments_collection.insert_one({
+            "member_id": body.member_id,
+            "member_name": member_name,
+            "amount": it["amount"],
+            "fee_type": it["description"],
+            "period": None,
+            "status": "Paid",
+            "due_date": pay_dt,
+            "paid_at": pay_dt,
+            "created_at": datetime.now(timezone.utc),
+            "gym_id": gym_id,
+        })
+    # Also mark existing Due/Overdue payments as Paid up to invoice total so member Payments tab stays consistent
     member_id = body.member_id
     inv_total = body.total
     if member_id and inv_total > 0:
@@ -2500,7 +2519,7 @@ async def billing_next_bill_number(gym_id: str = Depends(get_gym_id)):
 
 @app.post("/billing/issue", response_model=InvoiceResponse)
 async def billing_issue(body: BillingIssueWalkIn, gym_id: str = Depends(get_gym_id)):
-    """Walk-in flow: create member and issue first bill (Registration + 1st Month)."""
+    """Walk-in flow: create member and issue first bill (First Month only; add Registration as line item later if needed)."""
     from datetime import timezone
     from bson import ObjectId
     doc = {
@@ -2515,11 +2534,9 @@ async def billing_issue(body: BillingIssueWalkIn, gym_id: str = Depends(get_gym_
     }
     result = await members_collection.insert_one(doc)
     mid = str(result.inserted_id)
-    reg_amount = REGISTRATION_FEE
     monthly_amount = MONTHLY_FEE_PT if body.membership_type == MembershipType.pt else MONTHLY_FEE_REGULAR
-    total = reg_amount + monthly_amount
+    total = monthly_amount
     items = [
-        {"description": "Registration", "amount": reg_amount},
         {"description": "First Month", "amount": monthly_amount},
     ]
     inv_doc = {
@@ -2536,7 +2553,6 @@ async def billing_issue(body: BillingIssueWalkIn, gym_id: str = Depends(get_gym_
     due_dt = datetime(today_ist().year, today_ist().month, today_ist().day, tzinfo=timezone.utc)
     period = today_ist().strftime("%Y-%m")
     await payments_collection.insert_many([
-        {"member_id": mid, "member_name": body.name, "amount": reg_amount, "fee_type": "registration", "period": None, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id},
         {"member_id": mid, "member_name": body.name, "amount": monthly_amount, "fee_type": "monthly", "period": period, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id},
     ])
     _notify_registration(body.name, body.email, body.phone)
@@ -2634,6 +2650,22 @@ async def billing_pay(invoice_id: str, background_tasks: BackgroundTasks, gym_id
     now = datetime.now(timezone.utc)
     await invoices_collection.update_one(inv_q, {"$set": {"status": "Paid", "paid_at": now}})
     member_id = doc["member_id"]
+    member_name = doc.get("member_name", "")
+    inv_items = doc.get("items", [])
+    # Create one payment row per invoice line item so Member Payments tab reflects the invoice
+    for it in inv_items:
+        await payments_collection.insert_one({
+            "member_id": member_id,
+            "member_name": member_name,
+            "amount": it.get("amount", 0),
+            "fee_type": it.get("description", "Payment"),
+            "period": None,
+            "status": "Paid",
+            "due_date": now,
+            "paid_at": now,
+            "created_at": now,
+            "gym_id": gym_id,
+        })
     inv_total = doc.get("total") or 0
     # Sync payments collection: mark member's Due/Overdue payments as Paid up to invoice total (oldest first)
     if member_id and inv_total > 0:
@@ -2895,7 +2927,6 @@ async def import_members_excel(file: UploadFile = File(...), gym_id: str = Depen
                 mt = doc["membership_type"]
                 monthly_amount = MONTHLY_FEE_PT if mt == "PT" else MONTHLY_FEE_REGULAR
                 await payments_collection.insert_many([
-                    {"member_id": mid, "member_name": doc["name"], "amount": REGISTRATION_FEE, "fee_type": "registration", "period": None, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id},
                     {"member_id": mid, "member_name": doc["name"], "amount": monthly_amount, "fee_type": "monthly", "period": period, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id},
                 ])
                 created += 1

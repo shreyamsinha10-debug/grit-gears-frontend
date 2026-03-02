@@ -32,6 +32,8 @@ class _GymSettingsScreenState extends State<GymSettingsScreen> {
   final _cityController = TextEditingController();
   final _stateController = TextEditingController();
   final _pinCodeController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _termsController = TextEditingController();
   bool _loading = true;
   bool _saving = false;
   String? _error;
@@ -90,6 +92,8 @@ class _GymSettingsScreenState extends State<GymSettingsScreen> {
     _cityController.dispose();
     _stateController.dispose();
     _pinCodeController.dispose();
+    _phoneController.dispose();
+    _termsController.dispose();
     super.dispose();
   }
 
@@ -109,6 +113,8 @@ class _GymSettingsScreenState extends State<GymSettingsScreen> {
         _cityController.text = (data['city'] as String?) ?? '';
         _stateController.text = (data['state'] as String?) ?? '';
         _pinCodeController.text = (data['pin_code'] as String?) ?? '';
+        _phoneController.text = (data['phone'] as String?) ?? '';
+        _termsController.text = (data['terms_and_conditions'] as String?) ?? '';
         final batchesList = data['batches'] as List<dynamic>? ?? [];
         _batches = batchesList.map((b) {
           final m = b as Map<String, dynamic>;
@@ -159,6 +165,8 @@ class _GymSettingsScreenState extends State<GymSettingsScreen> {
         'city': _cityController.text.trim().isEmpty ? null : _cityController.text.trim(),
         'state': _stateController.text.trim().isEmpty ? null : _stateController.text.trim(),
         'pin_code': _pinCodeController.text.trim().isEmpty ? null : _pinCodeController.text.trim(),
+        'phone': _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
+        'terms_and_conditions': _termsController.text.trim().isEmpty ? null : _termsController.text.trim(),
         'batches': _batches.map((b) => {
           'id': b['id'],
           'name': b['name']!,
@@ -963,6 +971,38 @@ class _GymSettingsScreenState extends State<GymSettingsScreen> {
             style: GoogleFonts.poppins(),
             keyboardType: TextInputType.number,
             maxLength: 10,
+          ),
+          const SizedBox(height: 14),
+          Text('Phone number', style: GoogleFonts.poppins(fontWeight: FontWeight.w500, color: AppTheme.onSurface)),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _phoneController,
+            decoration: InputDecoration(
+              hintText: 'e.g. 9876543210',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              filled: true,
+              fillColor: theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
+              counterText: '',
+            ),
+            style: GoogleFonts.poppins(),
+            keyboardType: TextInputType.phone,
+            maxLength: 15,
+          ),
+          const SizedBox(height: 14),
+          Text('Terms and conditions (for invoice PDF)', style: GoogleFonts.poppins(fontWeight: FontWeight.w500, color: AppTheme.onSurface)),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _termsController,
+            decoration: InputDecoration(
+              hintText: 'One line per point. e.g.\n1. Membership fees are non-refundable.\n2. This invoice is valid for the period mentioned.',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              filled: true,
+              fillColor: theme.colorScheme.surfaceContainerHighest.withOpacity(0.5),
+              alignLabelWithHint: true,
+            ),
+            style: GoogleFonts.poppins(),
+            maxLines: 5,
+            minLines: 3,
           ),
           const SizedBox(height: 28),
           Row(
