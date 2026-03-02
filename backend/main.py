@@ -1586,7 +1586,7 @@ async def check_in(member_id: str, gym_id: str = Depends(get_gym_id_for_attendan
 
         if BATCH_CAPACITY and batch_time_slot in BATCH_CAPACITY:
             cap = BATCH_CAPACITY[batch_time_slot]
-            batch_q = {"date_ist": date_ist_str, "batch": batch_time_slot}
+            batch_q = {"date_ist": date_ist_str, "batch_time_slot": batch_time_slot}
             batch_q.update(_gym_filter(gym_id))
             count_today_batch = await attendance_collection.count_documents(batch_q)
             if count_today_batch >= cap:
@@ -1602,7 +1602,8 @@ async def check_in(member_id: str, gym_id: str = Depends(get_gym_id_for_attendan
             "check_in_at_utc": check_in_at_utc,
             "check_in_at_ist": now.isoformat(),
             "date_ist": date_ist_str,
-            "batch": batch_time_slot,
+            "batch": member_batch,
+            "batch_time_slot": batch_time_slot,
             "member_name": member.get("name", ""),
             "member_phone": member.get("phone"),
         }
@@ -2399,6 +2400,36 @@ class CreateBillRequest(BaseModel):
     notes: str | None = None
 
 
+class InvoiceUpdate(BaseModel):
+    """Update an existing invoice. All fields optional."""
+    items: list[CreateBillItem] | None = None
+    total: int | None = None
+    payment_date: str | None = None  # YYYY-MM-DD
+    end_date: str | None = None  # YYYY-MM-DD
+    member_phone: str | None = None
+    member_email: str | None = None
+    batch: str | None = None
+    notes: str | None = None
+
+
+def _invoice_period_dates(doc: dict):
+    """Return (start_date, end_date) for overlap check. Uses paid_at or issued_at; end_date or same as start."""
+    start = doc.get("paid_at") or doc.get("issued_at")
+    if not start:
+        return None, None
+    start_date = start.date() if hasattr(start, "date") else start
+    end = doc.get("end_date")
+    end_date = (end.date() if hasattr(end, "date") else end) if end else start_date
+    return start_date, end_date
+
+
+def _periods_overlap(s1, e1, s2, e2):
+    """True if date ranges (s1,e1) and (s2,e2) overlap. Inclusive."""
+    if s1 is None or e1 is None or s2 is None or e2 is None:
+        return False
+    return s1 <= e2 and s2 <= e1
+
+
 @app.post("/billing/create", response_model=InvoiceResponse)
 async def billing_create(body: CreateBillRequest, gym_id: str = Depends(get_gym_id)):
     """Create a bill for an existing member. Invoice is created as Paid with the given payment details."""
@@ -2443,14 +2474,28 @@ async def billing_create(body: CreateBillRequest, gym_id: str = Depends(get_gym_
         "payment_reference": body.reference,
         "notes": body.notes,
     }
+    end_dt = None
     if body.end_date:
         try:
             end_dt = datetime.strptime(body.end_date + " 23:59:59", "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
             inv_doc["end_date"] = end_dt
         except Exception:
             pass  # ignore invalid end_date
+    # Prevent overlapping invoice periods for the same member
+    start_new = pay_dt.date()
+    end_new = end_dt.date() if end_dt is not None else start_new
+    overlap_q = {"member_id": body.member_id}
+    overlap_q.update(_gym_filter(gym_id))
+    async for other in invoices_collection.find(overlap_q):
+        o_start, o_end = _invoice_period_dates(other)
+        if _periods_overlap(start_new, end_new, o_start, o_end):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Another invoice for this member already covers this period (e.g. {o_start} to {o_end}). Use different dates or edit the existing invoice.",
+            )
     inv_result = await invoices_collection.insert_one(inv_doc)
-    # Sync payments: create one payment row per invoice line item so Member Payments tab reflects the bill
+    inv_id_str = str(inv_result.inserted_id)
+    # Sync payments: create one payment row per invoice line item (with invoice_id for edit/delete sync)
     member_name = member.get("name", "")
     for it in items:
         await payments_collection.insert_one({
@@ -2464,6 +2509,7 @@ async def billing_create(body: CreateBillRequest, gym_id: str = Depends(get_gym_
             "paid_at": pay_dt,
             "created_at": datetime.now(timezone.utc),
             "gym_id": gym_id,
+            "invoice_id": inv_id_str,
         })
     # Also mark existing Due/Overdue payments as Paid up to invoice total so member Payments tab stays consistent
     member_id = body.member_id
@@ -2484,7 +2530,7 @@ async def billing_create(body: CreateBillRequest, gym_id: str = Depends(get_gym_
         if ids_to_mark:
             await payments_collection.update_many(
                 {"_id": {"$in": ids_to_mark}, **_gym_filter(gym_id)},
-                {"$set": {"status": "Paid", "paid_at": pay_dt}},
+                {"$set": {"status": "Paid", "paid_at": pay_dt, "invoice_id": inv_id_str}},
             )
     return InvoiceResponse(
         id=str(inv_result.inserted_id),
@@ -2665,6 +2711,7 @@ async def billing_pay(invoice_id: str, background_tasks: BackgroundTasks, gym_id
             "paid_at": now,
             "created_at": now,
             "gym_id": gym_id,
+            "invoice_id": str(doc["_id"]),
         })
     inv_total = doc.get("total") or 0
     # Sync payments collection: mark member's Due/Overdue payments as Paid up to invoice total (oldest first)
@@ -2709,6 +2756,126 @@ async def billing_pay(invoice_id: str, background_tasks: BackgroundTasks, gym_id
         member_email=updated.get("member_email"),
         batch=updated.get("batch"),
     )
+
+
+@app.patch("/billing/invoices/{invoice_id}", response_model=InvoiceResponse)
+async def billing_update_invoice(invoice_id: str, body: InvoiceUpdate, gym_id: str = Depends(get_gym_id)):
+    """Update an existing invoice. Corrections reflect everywhere (history, member payments tab). Overlap check excludes this invoice."""
+    from bson import ObjectId
+    from datetime import timezone
+    try:
+        oid = ObjectId(invoice_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid invoice ID")
+    inv_q = {"_id": oid}
+    inv_q.update(_gym_filter(gym_id))
+    doc = await invoices_collection.find_one(inv_q)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    member_id = doc["member_id"]
+    update = {}
+    if body.items is not None and body.total is not None:
+        if body.total != sum(i.amount for i in body.items):
+            raise HTTPException(status_code=400, detail="Total must match sum of item amounts")
+        update["items"] = [{"description": i.description, "amount": i.amount} for i in body.items]
+        update["total"] = body.total
+    if body.payment_date is not None:
+        try:
+            pay_dt = datetime.strptime(body.payment_date + " 12:00:00", "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            update["paid_at"] = pay_dt
+        except Exception:
+            raise HTTPException(status_code=400, detail="payment_date must be YYYY-MM-DD")
+    if body.end_date is not None:
+        try:
+            end_dt = datetime.strptime(body.end_date + " 23:59:59", "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            update["end_date"] = end_dt
+        except Exception:
+            update["end_date"] = None
+    if body.member_phone is not None:
+        update["member_phone"] = body.member_phone
+    if body.member_email is not None:
+        update["member_email"] = body.member_email
+    if body.batch is not None:
+        update["batch"] = body.batch
+    if body.notes is not None:
+        update["notes"] = body.notes
+    # Overlap check: new period vs other invoices of same member (exclude this one)
+    if "paid_at" in update or "end_date" in update or body.payment_date is not None or body.end_date is not None:
+        start_new = (update.get("paid_at") or doc.get("paid_at") or doc.get("issued_at"))
+        if start_new:
+            start_new = start_new.date() if hasattr(start_new, "date") else start_new
+        end_new = update.get("end_date") or doc.get("end_date")
+        if end_new is not None:
+            end_new = end_new.date() if hasattr(end_new, "date") else end_new
+        else:
+            end_new = start_new
+        if start_new is not None:
+            overlap_q = {"member_id": member_id, "_id": {"$ne": oid}}
+            overlap_q.update(_gym_filter(gym_id))
+            async for other in invoices_collection.find(overlap_q):
+                o_start, o_end = _invoice_period_dates(other)
+                if _periods_overlap(start_new, end_new, o_start, o_end):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Another invoice for this member already covers this period. Use different dates.",
+                    )
+    await invoices_collection.update_one(inv_q, {"$set": update})
+    # If Paid and items changed, sync payment rows: remove old ones linked to this invoice, add new from items
+    if doc.get("status") == "Paid" and "items" in update:
+        await payments_collection.delete_many({"invoice_id": invoice_id, **_gym_filter(gym_id)})
+        pay_dt = update.get("paid_at") or doc.get("paid_at") or datetime.now(timezone.utc)
+        member_name = doc.get("member_name", "")
+        for it in update["items"]:
+            await payments_collection.insert_one({
+                "member_id": member_id,
+                "member_name": member_name,
+                "amount": it["amount"],
+                "fee_type": it["description"],
+                "period": None,
+                "status": "Paid",
+                "due_date": pay_dt,
+                "paid_at": pay_dt,
+                "created_at": datetime.now(timezone.utc),
+                "gym_id": gym_id,
+                "invoice_id": invoice_id,
+            })
+    updated_doc = await invoices_collection.find_one(inv_q)
+    return InvoiceResponse(
+        id=str(updated_doc["_id"]),
+        member_id=updated_doc["member_id"],
+        member_name=updated_doc.get("member_name", ""),
+        items=updated_doc.get("items", []),
+        total=updated_doc["total"],
+        status=updated_doc.get("status", "Unpaid"),
+        issued_at=updated_doc["issued_at"],
+        paid_at=updated_doc.get("paid_at"),
+        bill_number=updated_doc.get("bill_number"),
+        payment_method=updated_doc.get("payment_method"),
+        notes=updated_doc.get("notes"),
+        end_date=updated_doc.get("end_date"),
+        member_phone=updated_doc.get("member_phone"),
+        member_email=updated_doc.get("member_email"),
+        batch=updated_doc.get("batch"),
+    )
+
+
+@app.delete("/billing/invoices/{invoice_id}", response_model=dict)
+async def billing_delete_invoice(invoice_id: str, gym_id: str = Depends(get_gym_id)):
+    """Delete an invoice and its linked payment rows. Corrections reflect everywhere."""
+    from bson import ObjectId
+    try:
+        oid = ObjectId(invoice_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid invoice ID")
+    inv_q = {"_id": oid}
+    inv_q.update(_gym_filter(gym_id))
+    doc = await invoices_collection.find_one(inv_q)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    # Remove payment rows linked to this invoice (so member Payments tab stays correct)
+    r_payments = await payments_collection.delete_many({"invoice_id": invoice_id, **_gym_filter(gym_id)})
+    await invoices_collection.delete_one(inv_q)
+    return {"message": "Invoice deleted", "payments_removed": r_payments.deleted_count}
 
 
 # ---------- Export to Excel (billing, members, payments) ----------

@@ -1174,6 +1174,47 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
             icon: const Icon(Icons.print_rounded, size: 18),
             label: const Text('Print / PDF'),
           ),
+          TextButton.icon(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await _InvoiceHistoryTabState.showEditInvoiceDialog(context, inv, onRefresh);
+            },
+            icon: const Icon(Icons.edit_outlined, size: 18),
+            label: const Text('Edit'),
+          ),
+          TextButton.icon(
+            onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: ctx,
+                builder: (c) => AlertDialog(
+                  title: const Text('Delete invoice?'),
+                  content: const Text('This cannot be undone. The invoice and its payment history will be removed from all screens.'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+                    FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+                      onPressed: () => Navigator.pop(c, true),
+                      child: const Text('Delete'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirm != true || !ctx.mounted) return;
+              final r = await ApiClient.instance.delete('/billing/invoices/${inv['id']}');
+              if (ctx.mounted) {
+                Navigator.pop(ctx);
+                onRefresh();
+                if (r.statusCode >= 200 && r.statusCode < 300) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invoice deleted')));
+                } else {
+                  final detail = (jsonDecode(r.body) as Map<String, dynamic>?)?['detail'] ?? 'Failed to delete';
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(detail.toString())));
+                }
+              }
+            },
+            icon: const Icon(Icons.delete_outline, size: 18),
+            label: const Text('Delete'),
+          ),
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
           if (!isPaid)
             FilledButton(
@@ -1190,6 +1231,162 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
               child: const Text('Mark as Paid'),
             ),
         ],
+      ),
+    );
+  }
+
+  static Future<void> showEditInvoiceDialog(BuildContext context, Map<String, dynamic> inv, VoidCallback onRefresh) async {
+    final rawItems = inv['items'] as List<dynamic>? ?? [];
+    List<Map<String, dynamic>> items = rawItems.map((e) => {
+      'description': (e as Map<String, dynamic>)['description']?.toString() ?? '',
+      'amount': (e as Map<String, dynamic>)['amount'] is int ? (e as Map<String, dynamic>)['amount'] as int : int.tryParse((e as Map<String, dynamic>)['amount']?.toString() ?? '0') ?? 0,
+    }).toList();
+    if (items.isEmpty) items = [{'description': '', 'amount': 0}];
+    DateTime paymentDate = inv['paid_at'] != null ? parseApiDateTime(inv['paid_at'].toString()) ?? DateTime.now() : (inv['issued_at'] != null ? parseApiDateTime(inv['issued_at'].toString()) ?? DateTime.now() : DateTime.now());
+    if (paymentDate.isUtc) paymentDate = paymentDate.toLocal();
+    DateTime? endDate = inv['end_date'] != null ? parseApiDateTime(inv['end_date'].toString()) : null;
+    if (endDate != null && endDate.isUtc) endDate = endDate.toLocal();
+    final notesController = TextEditingController(text: inv['notes']?.toString() ?? '');
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setState) {
+          int total = items.fold(0, (s, e) => s + ((e['amount'] as int?) ?? 0));
+          return AlertDialog(
+            title: Text('Edit invoice', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text('Line items', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 6),
+                  ...items.asMap().entries.map((e) => Row(
+                    key: ValueKey(e.key),
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          decoration: const InputDecoration(isDense: true, hintText: 'Description'),
+                          controller: TextEditingController(text: e.value['description'] as String? ?? ''),
+                          onChanged: (v) {
+                            items[e.key]['description'] = v;
+                            setState(() {});
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        width: 90,
+                        child: TextField(
+                          decoration: const InputDecoration(isDense: true, hintText: 'Amount'),
+                          keyboardType: TextInputType.number,
+                          controller: TextEditingController(text: '${e.value['amount'] ?? 0}'),
+                          onChanged: (v) {
+                            items[e.key]['amount'] = int.tryParse(v) ?? 0;
+                            setState(() {});
+                          },
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.remove_circle_outline, size: 20),
+                        onPressed: items.length > 1 ? () => setState(() => items.removeAt(e.key)) : null,
+                      ),
+                    ],
+                  )),
+                  TextButton.icon(
+                    onPressed: () => setState(() => items.add({'description': '', 'amount': 0})),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Add line'),
+                  ),
+                  const SizedBox(height: 12),
+                  Text('Payment date', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 4),
+                  InkWell(
+                    onTap: () async {
+                      final d = await showDatePicker(context: context, initialDate: paymentDate, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365)));
+                      if (d != null) setState(() => paymentDate = d);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(8)),
+                      child: Text(formatDisplayDate(paymentDate), style: GoogleFonts.poppins()),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text('End date (optional)', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500)),
+                  const SizedBox(height: 4),
+                  InkWell(
+                    onTap: () async {
+                      final d = await showDatePicker(context: context, initialDate: endDate ?? paymentDate, firstDate: paymentDate, lastDate: DateTime.now().add(const Duration(days: 365 * 2)));
+                      if (d != null) setState(() => endDate = d);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(8)),
+                      child: Text(endDate != null ? formatDisplayDate(endDate) : '—', style: GoogleFonts.poppins()),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: notesController,
+                    decoration: const InputDecoration(labelText: 'Notes', isDense: true),
+                    maxLines: 2,
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Total', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                      Text('₹$total', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppTheme.primary)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: () async {
+                  final itemsToSend = items.where((e) => (e['description'] as String? ?? '').trim().isNotEmpty || ((e['amount'] as int?) ?? 0) > 0).toList();
+                  if (itemsToSend.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Add at least one line item')));
+                    return;
+                  }
+                  final totalToSend = itemsToSend.fold(0, (s, e) => s + ((e['amount'] as int?) ?? 0));
+                  if (totalToSend <= 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Total must be greater than 0')));
+                    return;
+                  }
+                  final body = <String, dynamic>{
+                    'items': itemsToSend.map((e) => {'description': (e['description'] as String? ?? '').trim().isEmpty ? 'Item' : e['description'], 'amount': e['amount'] as int? ?? 0}).toList(),
+                    'total': totalToSend,
+                    'payment_date': formatApiDate(paymentDate),
+                    'notes': notesController.text.trim().isEmpty ? null : notesController.text.trim(),
+                  };
+                  if (endDate != null) body['end_date'] = formatApiDate(endDate);
+                  final r = await ApiClient.instance.patch(
+                    '/billing/invoices/${inv['id']}',
+                    headers: {'Content-Type': 'application/json'},
+                    body: jsonEncode(body),
+                  );
+                  if (context.mounted) {
+                    Navigator.pop(ctx);
+                    onRefresh();
+                    if (r.statusCode >= 200 && r.statusCode < 300) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invoice updated')));
+                    } else {
+                      final detail = (jsonDecode(r.body) as Map<String, dynamic>?)?['detail'] ?? 'Failed to update';
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(detail.toString())));
+                    }
+                  }
+                },
+                child: const Text('Save'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
