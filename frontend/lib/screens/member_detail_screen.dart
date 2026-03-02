@@ -21,6 +21,7 @@ import 'package:intl/intl.dart';
 import '../core/api_client.dart';
 import '../core/date_utils.dart';
 import '../core/image_compression.dart';
+import '../core/pdf_invoice_helper.dart';
 import '../theme/app_theme.dart';
 import '../widgets/attendance_stats_card.dart';
 import 'dashboard_screen.dart';
@@ -300,7 +301,7 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
   late TabController _tabController;
   late Member _member;
   Map<String, dynamic>? _attendanceStats;
-  List<dynamic> _payments = [];
+  List<dynamic> _payments = []; // Paid invoices for this member (from billing/history, status=Paid)
   List<dynamic> _attendanceList = [];
   bool _loadingPayments = true;
   bool _loadingAttendance = true;
@@ -418,10 +419,11 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
   Future<void> _loadPayments() async {
     setState(() => _loadingPayments = true);
     try {
-      final r = await ApiClient.instance.get('/payments', queryParameters: {'member_id': _member.id}, useCache: false);
+      final r = await ApiClient.instance.get('/billing/history', queryParameters: {'member_id': _member.id}, useCache: false);
       if (mounted && r.statusCode == 200) {
+        final list = jsonDecode(r.body) as List<dynamic>? ?? [];
         setState(() {
-          _payments = jsonDecode(r.body) as List<dynamic>;
+          _payments = list.where((e) => (e as Map<String, dynamic>)['status'] == 'Paid').toList();
           _loadingPayments = false;
         });
       } else if (mounted) setState(() => _loadingPayments = false);
@@ -1002,7 +1004,7 @@ class _OverviewTab extends StatelessWidget {
 }
 
 class _PaymentsTab extends StatelessWidget {
-  final List<dynamic> payments;
+  final List<dynamic> payments; // Paid invoices only
   final bool loading;
   final VoidCallback onRefresh;
 
@@ -1021,7 +1023,7 @@ class _PaymentsTab extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text('Payment history — period and date received', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
+            Text('Payment history', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
             const SizedBox(height: 8),
             Text('No payments yet', style: GoogleFonts.poppins(color: Colors.grey)),
           ],
@@ -1039,28 +1041,70 @@ class _PaymentsTab extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Text(
-              'Payment history — period and date received',
+              'Payment history',
               style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.onSurface),
             ),
           ),
           ...payments.map<Widget>((e) {
-            final p = e as Map<String, dynamic>;
-            final paidAt = p['paid_at'];
-            final paidDateStr = paidAt != null ? formatDisplayDate(parseApiDateTime(paidAt.toString())) : null;
-            final isPaid = p['status'] == 'Paid';
-            final periodLabel = p['period'] ?? (p['fee_type'] == 'registration' ? 'Registration' : (p['fee_type'] ?? '—'));
+            final inv = e as Map<String, dynamic>;
+            final paidAt = inv['paid_at'];
+            final paidDateStr = paidAt != null ? formatDisplayDate(parseApiDateTime(paidAt.toString())) : '—';
+            final billNo = inv['bill_number'] as String? ?? '#${(inv['id'] as String? ?? '').substring(0, 8)}';
+            final total = (inv['total'] as num?)?.toInt() ?? 0;
+            final rawItems = inv['items'];
+            final items = rawItems is List
+                ? List<dynamic>.from(rawItems)
+                : (rawItems is Map ? [rawItems] : <dynamic>[]);
             return Card(
-              margin: const EdgeInsets.only(bottom: 8),
-              child: ListTile(
-                title: Text('${p['fee_type']} • $periodLabel', style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
-                subtitle: Column(
+              margin: const EdgeInsets.only(bottom: 12),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('₹${p['amount']}', style: GoogleFonts.poppins(color: AppTheme.primary)),
-                    Text(
-                      isPaid && paidDateStr != null ? 'Received: $paidDateStr' : (isPaid ? 'Received: —' : 'Due'),
-                      style: GoogleFonts.poppins(fontSize: 13, color: isPaid && paidDateStr != null ? AppTheme.primary : Colors.grey.shade600),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(billNo, style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
+                        Text('Received: $paidDateStr', style: GoogleFonts.poppins(fontSize: 13, color: AppTheme.primary)),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    ...items.map<Widget>((it) {
+                      final item = it as Map<String, dynamic>? ?? {};
+                      final desc = item['description']?.toString() ?? '';
+                      final amt = (item['amount'] as num?)?.toInt() ?? 0;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(child: Text(desc, style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade700))),
+                            Text('₹$amt', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500)),
+                          ],
+                        ),
+                      );
+                    }),
+                    const Divider(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Total', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600)),
+                        Text('₹$total', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.primary)),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        Map<String, dynamic>? gymProfile;
+                        try {
+                          final r = await ApiClient.instance.get('/gym/profile', useCache: true);
+                          if (r.statusCode >= 200 && r.statusCode < 300) gymProfile = jsonDecode(r.body) as Map<String, dynamic>?;
+                        } catch (_) {}
+                        if (context.mounted) await PdfInvoiceHelper.generateAndPrint(inv, gymProfile: gymProfile);
+                      },
+                      icon: const Icon(Icons.print_rounded, size: 18),
+                      label: const Text('Print invoice PDF'),
                     ),
                   ],
                 ),

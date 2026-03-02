@@ -361,7 +361,8 @@ class _CreateBillTabState extends State<_CreateBillTab> {
       if (r.statusCode >= 200 && r.statusCode < 300) {
         final inv = jsonDecode(r.body) as Map<String, dynamic>;
         final billNo = inv['bill_number'] as String? ?? '—';
-        // Success dialog
+        // Success dialog with option to print the created invoice (all line items)
+        if (!context.mounted) return;
         await showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
@@ -389,6 +390,18 @@ class _CreateBillTabState extends State<_CreateBillTab> {
               ],
             ),
             actions: [
+              OutlinedButton.icon(
+                onPressed: () async {
+                  Map<String, dynamic>? gymProfile;
+                  try {
+                    final rp = await ApiClient.instance.get('/gym/profile', useCache: true);
+                    if (rp.statusCode >= 200 && rp.statusCode < 300) gymProfile = jsonDecode(rp.body) as Map<String, dynamic>?;
+                  } catch (_) {}
+                  if (ctx.mounted) await PdfInvoiceHelper.generateAndPrint(inv, gymProfile: gymProfile);
+                },
+                icon: const Icon(Icons.print_rounded, size: 18),
+                label: const Text('Print / PDF'),
+              ),
               FilledButton(
                 onPressed: () => Navigator.pop(ctx),
                 style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),

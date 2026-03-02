@@ -69,7 +69,11 @@ class PdfInvoiceHelper {
     final totalFormatted = _formatAmount(total);
     final amountWords = _amountInWords(total);
 
-    final items = invoice['items'] as List<dynamic>? ?? [];
+    // Use all line items as stored (list of {description, amount}); normalize so single object becomes list
+    final rawItems = invoice['items'];
+    final List<dynamic> items = rawItems is List
+        ? List<dynamic>.from(rawItems)
+        : (rawItems is Map ? [rawItems] : <dynamic>[]);
     final paymentMethod = (invoice['payment_method']?.toString() ?? 'Cash').toLowerCase();
     final isPaid = invoice['status']?.toString() == 'Paid';
 
