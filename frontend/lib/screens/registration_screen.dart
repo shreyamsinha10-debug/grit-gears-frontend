@@ -401,12 +401,24 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                   ),
                   const SizedBox(height: 20),
                   DropdownButtonFormField<String>(
+                    value: _membershipType,
+                    decoration: _inputDecoration('Training type', null),
+                    dropdownColor: AppTheme.surfaceVariant,
+                    style: GoogleFonts.poppins(color: AppTheme.onSurface, fontSize: 16),
+                    items: const [
+                      DropdownMenuItem(value: 'Regular', child: Text('Regular')),
+                      DropdownMenuItem(value: 'PT', child: Text('PT (Personal Training)')),
+                    ],
+                    onChanged: (v) => setState(() => _membershipType = v ?? 'Regular'),
+                  ),
+                  const SizedBox(height: 20),
+                  DropdownButtonFormField<String>(
                     value: _selectedPlanId,
-                    decoration: _inputDecoration('Membership Type', null),
+                    decoration: _inputDecoration('Membership plan (optional)', null),
                     dropdownColor: AppTheme.surfaceVariant,
                     style: GoogleFonts.poppins(color: AppTheme.onSurface, fontSize: 16),
                     items: [
-                      const DropdownMenuItem(value: null, child: Text('Manual (Regular/PT)')),
+                      const DropdownMenuItem(value: null, child: Text('No plan — use Training type for billing')),
                       ..._plans.map((p) {
                         final id = p['id'] as String? ?? '';
                         final name = p['name'] as String? ?? '';
@@ -418,41 +430,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                         );
                       }),
                     ],
-                    onChanged: (v) {
-                      setState(() {
-                        _selectedPlanId = v;
-                        if (v != null) {
-                          // Auto-set membership type based on plan name if it contains PT
-                          final plan = _plans.firstWhere((p) => p['id'] == v, orElse: () => {});
-                          if (plan.isNotEmpty) {
-                            final name = (plan['name'] as String? ?? '').toLowerCase();
-                            if (name.contains('pt') || name.contains('personal')) {
-                              _membershipType = 'PT';
-                            } else {
-                              _membershipType = 'Regular';
-                            }
-                          }
-                        } else {
-                          // Reset to default if Manual selected
-                          _membershipType = 'Regular';
-                        }
-                      });
-                    },
+                    onChanged: (v) => setState(() => _selectedPlanId = v),
                   ),
-                  if (_selectedPlanId == null) ...[
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      value: _membershipType,
-                      decoration: _inputDecoration('Manual Type', null),
-                      dropdownColor: AppTheme.surfaceVariant,
-                      style: GoogleFonts.poppins(color: AppTheme.onSurface, fontSize: 16),
-                      items: [
-                        DropdownMenuItem(value: 'Regular', child: Text('Regular', style: GoogleFonts.poppins(color: AppTheme.onSurface))),
-                        DropdownMenuItem(value: 'PT', child: Text('PT', style: GoogleFonts.poppins(color: AppTheme.onSurface))),
-                      ],
-                      onChanged: (v) => setState(() => _membershipType = v ?? 'Regular'),
-                    ),
-                  ],
                   const SizedBox(height: 20),
                   DropdownButtonFormField<String>(
                     value: _batches.isEmpty

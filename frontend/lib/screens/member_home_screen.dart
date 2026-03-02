@@ -693,6 +693,7 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
           ),
         ),
       ),
+    ),
     );
   }
 
@@ -809,7 +810,6 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
           ),
         ],
       ),
-    ),
     );
   }
 }

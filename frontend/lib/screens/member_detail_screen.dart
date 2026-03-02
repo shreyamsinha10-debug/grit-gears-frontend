@@ -28,9 +28,8 @@ import 'login_screen.dart';
 
 /// Shows edit member dialog; returns updated [Member] on save, null on cancel.
 Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
-  // Fetch dynamic batches and membership plans from gym settings
+  // Fetch dynamic batches from gym settings
   List<String> batchNames = [];
-  List<Map<String, dynamic>> planList = [];
   try {
     final r = await ApiClient.instance.get('/gym/profile', useCache: false);
     if (r.statusCode >= 200 && r.statusCode < 300) {
@@ -40,25 +39,15 @@ Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
           .map((b) => ((b as Map<String, dynamic>)['name'] as String? ?? '').trim())
           .where((n) => n.isNotEmpty)
           .toList();
-      final plansRaw = data['plans'] as List<dynamic>? ?? [];
-      for (final p in plansRaw) {
-        final map = p as Map<String, dynamic>;
-        if (map['is_active'] != false) {
-          final name = (map['name'] as String? ?? '').trim();
-          if (name.isNotEmpty) planList.add(map);
-        }
-      }
     }
   } catch (_) {}
   // Always include member's current batch so the dropdown has a valid value
   if (m.batch.isNotEmpty && !batchNames.contains(m.batch)) batchNames.insert(0, m.batch);
   if (batchNames.isEmpty) batchNames = ['Morning', 'Evening', 'Ladies'];
 
-  // Build membership options: active plans first, then ensure current member type is in list, fallback to Regular/PT
-  final planNames = planList.map((p) => (p['name'] as String? ?? '').trim()).where((n) => n.isNotEmpty).toList();
-  List<String> membershipOptions = List.from(planNames);
-  if (m.membershipType.isNotEmpty && !membershipOptions.contains(m.membershipType)) membershipOptions.insert(0, m.membershipType);
-  if (membershipOptions.isEmpty) membershipOptions = ['Regular', 'PT'];
+  // Training type: Regular or PT (derive from current membership_type for display)
+  final isPT = m.membershipType.toLowerCase().contains('pt');
+  String trainingType = isPT ? 'PT' : 'Regular';
 
   final nameController = TextEditingController(text: m.name);
   final phoneController = TextEditingController(text: m.phone);
@@ -66,7 +55,6 @@ Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
   final addressController = TextEditingController(text: m.address ?? '');
   String batch = batchNames.contains(m.batch) ? m.batch : batchNames.first;
   String status = m.status;
-  String membershipType = membershipOptions.contains(m.membershipType) ? m.membershipType : membershipOptions.first;
   String? gender = m.gender;
   DateTime? dateOfBirth = m.dateOfBirth != null && m.dateOfBirth!.isNotEmpty ? DateTime.tryParse(m.dateOfBirth!) : null;
   final scheduleController = TextEditingController(text: m.workoutSchedule ?? '');
@@ -120,12 +108,13 @@ Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
-                value: membershipType,
-                decoration: const InputDecoration(labelText: 'Membership type'),
-                items: membershipOptions
-                    .map((name) => DropdownMenuItem(value: name, child: Text(name)))
-                    .toList(),
-                onChanged: (v) => setDialogState(() => membershipType = v ?? membershipType),
+                value: trainingType,
+                decoration: const InputDecoration(labelText: 'Training type'),
+                items: const [
+                  DropdownMenuItem(value: 'Regular', child: Text('Regular')),
+                  DropdownMenuItem(value: 'PT', child: Text('PT (Personal Training)')),
+                ],
+                onChanged: (v) => setDialogState(() => trainingType = v ?? trainingType),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
@@ -147,7 +136,7 @@ Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
                 ],
                 onChanged: (v) => setDialogState(() => status = v ?? status),
               ),
-              if (membershipType.toLowerCase() == 'pt') ...[
+              if (trainingType.toLowerCase() == 'pt') ...[
                 const SizedBox(height: 12),
                 TextField(controller: scheduleController, maxLines: 3, decoration: const InputDecoration(labelText: 'Workout schedule', alignLabelWithHint: true)),
                 const SizedBox(height: 12),
@@ -159,19 +148,19 @@ Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           FilledButton(
-            onPressed: () async {
+              onPressed: () async {
               final body = <String, dynamic>{
                 'name': nameController.text.trim(),
                 'phone': phoneController.text.trim(),
                 'email': emailController.text.trim(),
                 'batch': batch,
                 'status': status,
-                'membership_type': membershipType,
+                'membership_type': trainingType,
                 'address': addressController.text.trim(),
                 'date_of_birth': dateOfBirth != null ? formatApiDate(dateOfBirth!) : null,
                 'gender': gender,
               };
-              if (membershipType.toLowerCase() == 'pt') {
+              if (trainingType.toLowerCase() == 'pt') {
                 body['workout_schedule'] = scheduleController.text;
                 body['diet_chart'] = dietController.text;
               }
@@ -1032,9 +1021,9 @@ class _PaymentsTab extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text('All payments made by member till date', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
+            Text('Payment history — period and date received', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.onSurface)),
             const SizedBox(height: 8),
-            Text('No payments', style: GoogleFonts.poppins(color: Colors.grey)),
+            Text('No payments yet', style: GoogleFonts.poppins(color: Colors.grey)),
           ],
         ),
       );
@@ -1050,7 +1039,7 @@ class _PaymentsTab extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Text(
-              'All payments made by member till date',
+              'Payment history — period and date received',
               style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.onSurface),
             ),
           ),
@@ -1058,6 +1047,7 @@ class _PaymentsTab extends StatelessWidget {
             final p = e as Map<String, dynamic>;
             final paidAt = p['paid_at'];
             final paidDateStr = paidAt != null ? formatDisplayDate(parseApiDateTime(paidAt.toString())) : null;
+            final isPaid = p['status'] == 'Paid';
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
               child: ListTile(
@@ -1067,12 +1057,9 @@ class _PaymentsTab extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text('₹${p['amount']}', style: GoogleFonts.poppins(color: AppTheme.primary)),
-                    if (paidDateStr != null && (p['status'] == 'Paid')) Text('Paid on $paidDateStr', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
+                    if (isPaid && paidDateStr != null)
+                      Text('Paid on $paidDateStr', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
                   ],
-                ),
-                trailing: Chip(
-                  label: Text(p['status'] ?? ''),
-                  backgroundColor: (p['status'] == 'Paid') ? AppTheme.success.withOpacity(0.2) : Colors.orange.withOpacity(0.2),
                 ),
               ),
             );

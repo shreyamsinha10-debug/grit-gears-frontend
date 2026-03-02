@@ -966,8 +966,7 @@ async def create_member(member: MemberCreate, gym_id: str = Depends(get_gym_id))
                 break
         if not plan:
             raise HTTPException(status_code=400, detail="Membership plan not found")
-        mt = str(plan.get("name", ""))
-        doc["membership_type"] = mt
+        # Keep membership_type from request (Regular/PT from Training type); use plan only for payment creation
     doc["workout_schedule"] = doc.get("workout_schedule")
     doc["diet_chart"] = doc.get("diet_chart")
     result = await members_collection.insert_one(doc)
