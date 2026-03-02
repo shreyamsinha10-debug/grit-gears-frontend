@@ -1365,7 +1365,7 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
                     'payment_date': formatApiDate(paymentDate),
                     'notes': notesController.text.trim().isEmpty ? null : notesController.text.trim(),
                   };
-                  if (endDate != null) body['end_date'] = formatApiDate(endDate);
+                  if (endDate != null) body['end_date'] = formatApiDate(endDate!);
                   final r = await ApiClient.instance.patch(
                     '/billing/invoices/${inv['id']}',
                     headers: {'Content-Type': 'application/json'},
