@@ -135,9 +135,46 @@ class _CreateBillTabState extends State<_CreateBillTab> {
   // Payment
   String _paymentMethod = 'Cash';
   DateTime _paymentDate = DateTime.now();
+  DateTime? _endDateOverride; // user-adjusted end date; when null, use computed from plan duration
   final _referenceController = TextEditingController();
   final _notesController = TextEditingController();
   bool _submitting = false;
+
+  /// Editable batch for invoice (defaults to member's batch when member selected).
+  final _batchController = TextEditingController();
+
+  /// Map plan duration_type to days (1m=30, 3m=90, etc.). Returns null for one_time or unknown.
+  static int? _durationTypeToDays(String? dt) {
+    switch (dt) {
+      case '1m': return 30;
+      case '2m': return 60;
+      case '3m': return 90;
+      case '6m': return 180;
+      case '1yr': return 365;
+      default: return null;
+    }
+  }
+
+  /// Max duration in days from current line items (from plans with duration_type). Null if none.
+  int? get _maxPlanDays {
+    int? maxDays;
+    for (final item in _items) {
+      final dt = item['duration_type'] as String?;
+      final d = _durationTypeToDays(dt);
+      if (d != null && (maxDays == null || d > maxDays)) maxDays = d;
+    }
+    return maxDays;
+  }
+
+  /// System-computed end date from start date + longest plan duration. Null if no plan duration.
+  DateTime? get _computedEndDate {
+    final days = _maxPlanDays;
+    if (days == null || days <= 0) return null;
+    return _paymentDate.add(Duration(days: days));
+  }
+
+  /// Display end date: user override or computed. Used for "Ends: ..." and editable picker.
+  DateTime? get _displayEndDate => _endDateOverride ?? _computedEndDate;
 
   @override
   void initState() {
@@ -154,6 +191,7 @@ class _CreateBillTabState extends State<_CreateBillTab> {
     _customAmountController.dispose();
     _referenceController.dispose();
     _notesController.dispose();
+    _batchController.dispose();
     super.dispose();
   }
 
@@ -220,6 +258,7 @@ class _CreateBillTabState extends State<_CreateBillTab> {
       _selectedMember = m;
       _memberSearchController.clear();
       _items.clear();
+      _batchController.text = m['batch']?.toString() ?? '';
     });
     // Auto-add a matching plan
     if (_plans.isNotEmpty) {
@@ -236,7 +275,11 @@ class _CreateBillTabState extends State<_CreateBillTab> {
       final price = int.tryParse(matched['price']?.toString() ?? '0') ?? 0;
       if (price > 0) {
         setState(() {
-          _items.add({'description': matched!['name'] as String? ?? 'Membership Fee', 'amount': price});
+          _items.add({
+            'description': matched!['name'] as String? ?? 'Membership Fee',
+            'amount': price,
+            'duration_type': matched['duration_type'] as String?,
+          });
         });
       }
     }
@@ -249,8 +292,13 @@ class _CreateBillTabState extends State<_CreateBillTab> {
     }
     final price = int.tryParse(_addPlan!['price']?.toString() ?? '0') ?? 0;
     setState(() {
-      _items.add({'description': _addPlan!['name'] as String? ?? 'Plan', 'amount': price});
+      _items.add({
+        'description': _addPlan!['name'] as String? ?? 'Plan',
+        'amount': price,
+        'duration_type': _addPlan!['duration_type'] as String?,
+      });
       _addPlan = null;
+      _endDateOverride = null;
     });
   }
 
@@ -274,15 +322,40 @@ class _CreateBillTabState extends State<_CreateBillTab> {
 
     setState(() => _submitting = true);
     try {
-      final body = jsonEncode({
+      // Build item descriptions for invoice: plan items get "Plan - X days (Start - End)"
+      final endDate = _displayEndDate;
+      final startStr = formatDisplayDate(_paymentDate);
+      final endStr = endDate != null ? formatDisplayDate(endDate) : null;
+      final itemsForApi = _items.map<Map<String, dynamic>>((item) {
+        final desc = item['description'] as String? ?? '';
+        final amount = (item['amount'] as num?)?.toInt() ?? 0;
+        final dt = item['duration_type'] as String?;
+        final days = dt != null ? _durationTypeToDays(dt) : null;
+        String finalDesc = desc;
+        if (days != null && endStr != null) {
+          finalDesc = '$desc - $days days ($startStr - $endStr)';
+        }
+        return {'description': finalDesc, 'amount': amount};
+      }).toList();
+
+      final bodyMap = <String, dynamic>{
         'member_id': _selectedMember!['id'],
-        'items': _items,
+        'items': itemsForApi,
         'total': _total,
         'payment_method': _paymentMethod,
         'payment_date': formatApiDate(_paymentDate),
         'reference': _referenceController.text.trim().isEmpty ? null : _referenceController.text.trim(),
         'notes': _notesController.text.trim().isEmpty ? null : _notesController.text.trim(),
-      });
+      };
+      if (_displayEndDate != null) bodyMap['end_date'] = formatApiDate(_displayEndDate!);
+      final batchVal = _batchController.text.trim();
+      if (batchVal.isNotEmpty) bodyMap['batch'] = batchVal;
+      final phone = _selectedMember!['phone']?.toString();
+      if (phone != null && phone.isNotEmpty) bodyMap['member_phone'] = phone;
+      final email = _selectedMember!['email']?.toString();
+      if (email != null && email.isNotEmpty) bodyMap['member_email'] = email;
+
+      final body = jsonEncode(bodyMap);
       final r = await ApiClient.instance.post('/billing/create', headers: {'Content-Type': 'application/json'}, body: body);
       if (!mounted) return;
       if (r.statusCode >= 200 && r.statusCode < 300) {
@@ -334,8 +407,10 @@ class _CreateBillTabState extends State<_CreateBillTab> {
           _notesController.clear();
           _paymentMethod = 'Cash';
           _paymentDate = DateTime.now();
+          _endDateOverride = null;
           _addPlan = null;
           _addingCustom = false;
+          _batchController.clear();
         });
         _loadNextBillNumber();
       } else {
@@ -393,6 +468,19 @@ class _CreateBillTabState extends State<_CreateBillTab> {
           const SizedBox(height: 8),
           if (_selectedMember != null) ...[
             _memberCard(_selectedMember!),
+            const SizedBox(height: 12),
+            Text('Batch (for invoice)', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500)),
+            const SizedBox(height: 4),
+            TextField(
+              controller: _batchController,
+              decoration: InputDecoration(
+                hintText: 'e.g. Morning, Evening',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                isDense: true,
+              ),
+              style: GoogleFonts.poppins(),
+              onChanged: (_) => setState(() {}),
+            ),
           ] else ...[
             TextField(
               controller: _memberSearchController,
@@ -468,7 +556,7 @@ class _CreateBillTabState extends State<_CreateBillTab> {
                       const SizedBox(width: 4),
                       IconButton(
                         icon: const Icon(Icons.remove_circle_outline, size: 20, color: Colors.red),
-                        onPressed: () => setState(() => _items.removeAt(e.key)),
+                        onPressed: () => setState(() { _items.removeAt(e.key); _endDateOverride = null; }),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                       ),
@@ -615,13 +703,13 @@ class _CreateBillTabState extends State<_CreateBillTab> {
                     }).toList(),
                   ),
                   const SizedBox(height: 14),
-                  // Date
-                  Text('Payment Date', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500)),
+                  // Start date (membership start; API still uses payment_date)
+                  Text('Start date', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500)),
                   const SizedBox(height: 6),
                   InkWell(
                     onTap: () async {
                       final d = await showDatePicker(context: context, initialDate: _paymentDate, firstDate: DateTime(2020), lastDate: DateTime.now().add(const Duration(days: 365)));
-                      if (d != null) setState(() => _paymentDate = d);
+                      if (d != null) setState(() { _paymentDate = d; _endDateOverride = null; });
                     },
                     borderRadius: BorderRadius.circular(10),
                     child: Container(
@@ -639,6 +727,42 @@ class _CreateBillTabState extends State<_CreateBillTab> {
                       ),
                     ),
                   ),
+                  if (_displayEndDate != null) ...[
+                    const SizedBox(height: 8),
+                    Text('End date (editable)', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Ends: ${formatDisplayDate(_displayEndDate)}${_maxPlanDays != null ? ' · ${_maxPlanDays} days from start' : ''}',
+                      style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600),
+                    ),
+                    const SizedBox(height: 4),
+                    InkWell(
+                      onTap: () async {
+                        final d = await showDatePicker(
+                          context: context,
+                          initialDate: _displayEndDate!,
+                          firstDate: _paymentDate,
+                          lastDate: _paymentDate.add(const Duration(days: 365 * 2)),
+                        );
+                        if (d != null) setState(() => _endDateOverride = d);
+                      },
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade400),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.event, size: 18, color: Colors.grey),
+                            const SizedBox(width: 8),
+                            Text(formatDisplayDate(_displayEndDate), style: GoogleFonts.poppins(fontSize: 14)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 14),
                   // Reference
                   Text('Reference (optional)', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500)),
@@ -710,7 +834,7 @@ class _CreateBillTabState extends State<_CreateBillTab> {
       ),
       trailing: IconButton(
         icon: const Icon(Icons.close, size: 20),
-        onPressed: () => setState(() { _selectedMember = null; _items.clear(); _addPlan = null; }),
+        onPressed: () => setState(() { _selectedMember = null; _items.clear(); _addPlan = null; _batchController.clear(); }),
         tooltip: 'Change member',
       ),
     ),
@@ -1011,6 +1135,10 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
                     Text('Paid on $paidStr${method != null ? ' via $method' : ''}', style: GoogleFonts.poppins(fontSize: 13, color: Colors.green.shade700)),
                   ],
                 ),
+              ],
+              if (inv['end_date'] != null) ...[
+                const SizedBox(height: 6),
+                Text('Valid until ${formatDisplayDate(parseApiDateTime(inv['end_date'].toString()))}', style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade600)),
               ],
               if (!isPaid) ...[
                 const SizedBox(height: 16),

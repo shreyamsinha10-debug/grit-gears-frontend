@@ -321,6 +321,10 @@ class InvoiceResponse(BaseModel):
     bill_number: str | None = None  # e.g. BILL-2026-00001
     payment_method: str | None = None  # Cash | Online
     notes: str | None = None
+    end_date: datetime | None = None  # membership period end (from Create Bill)
+    member_phone: str | None = None
+    member_email: str | None = None
+    batch: str | None = None
 
 
 class AttendanceRecord(BaseModel):
@@ -1565,7 +1569,8 @@ async def check_in(member_id: str, gym_id: str = Depends(get_gym_id_for_attendan
 
         now = now_ist()
         date_ist_str = now.strftime("%Y-%m-%d")
-        batch = batch_from_ist(now)
+        batch_time_slot = batch_from_ist(now)  # for capacity check (Morning/Evening/Ladies)
+        member_batch = (member.get("batch") or "").strip() or batch_time_slot  # enrolled batch for display
 
         already_today = await attendance_collection.find_one(
             {"member_id": member_id, "date_ist": date_ist_str, **_gym_filter(gym_id)},
@@ -1576,15 +1581,15 @@ async def check_in(member_id: str, gym_id: str = Depends(get_gym_id_for_attendan
                 detail="Already checked in today. One check-in per day allowed.",
             )
 
-        if BATCH_CAPACITY and batch in BATCH_CAPACITY:
-            cap = BATCH_CAPACITY[batch]
-            batch_q = {"date_ist": date_ist_str, "batch": batch}
+        if BATCH_CAPACITY and batch_time_slot in BATCH_CAPACITY:
+            cap = BATCH_CAPACITY[batch_time_slot]
+            batch_q = {"date_ist": date_ist_str, "batch": batch_time_slot}
             batch_q.update(_gym_filter(gym_id))
             count_today_batch = await attendance_collection.count_documents(batch_q)
             if count_today_batch >= cap:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Batch full. {batch} batch has reached capacity ({cap}). Try another batch.",
+                    detail=f"Batch full. {batch_time_slot} batch has reached capacity ({cap}). Try another batch.",
                 )
 
         check_in_at_utc = now.astimezone(timezone.utc)
@@ -1594,7 +1599,7 @@ async def check_in(member_id: str, gym_id: str = Depends(get_gym_id_for_attendan
             "check_in_at_utc": check_in_at_utc,
             "check_in_at_ist": now.isoformat(),
             "date_ist": date_ist_str,
-            "batch": batch,
+            "batch": batch_time_slot,
             "member_name": member.get("name", ""),
             "member_phone": member.get("phone"),
         }
@@ -1614,7 +1619,7 @@ async def check_in(member_id: str, gym_id: str = Depends(get_gym_id_for_attendan
             member_phone=doc.get("member_phone"),
             check_in_at=now,
             date_ist=date_ist_str,
-            batch=batch,
+            batch=member_batch,
             check_out_at=None,
         )
     except HTTPException:
@@ -2382,7 +2387,11 @@ class CreateBillRequest(BaseModel):
     items: list[CreateBillItem] = Field(..., min_length=1)
     total: int = Field(..., ge=0)
     payment_method: str = Field(default="Cash")  # Cash | Online
-    payment_date: str = Field(...)  # YYYY-MM-DD
+    payment_date: str = Field(...)  # YYYY-MM-DD (start date / payment date)
+    end_date: str | None = None  # YYYY-MM-DD optional; membership period end (editable from UI)
+    member_phone: str | None = None  # For invoice "Bill To"; defaults to member's phone
+    member_email: str | None = None  # For invoice "Bill To"; defaults to member's email
+    batch: str | None = None  # For invoice; defaults to member's batch
     reference: str | None = None
     notes: str | None = None
 
@@ -2417,6 +2426,9 @@ async def billing_create(body: CreateBillRequest, gym_id: str = Depends(get_gym_
     inv_doc = {
         "member_id": body.member_id,
         "member_name": member.get("name", ""),
+        "member_phone": body.member_phone or member.get("phone"),
+        "member_email": body.member_email or member.get("email"),
+        "batch": body.batch or member.get("batch"),
         "items": items,
         "total": body.total,
         "status": "Paid",
@@ -2428,7 +2440,34 @@ async def billing_create(body: CreateBillRequest, gym_id: str = Depends(get_gym_
         "payment_reference": body.reference,
         "notes": body.notes,
     }
+    if body.end_date:
+        try:
+            end_dt = datetime.strptime(body.end_date + " 23:59:59", "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            inv_doc["end_date"] = end_dt
+        except Exception:
+            pass  # ignore invalid end_date
     inv_result = await invoices_collection.insert_one(inv_doc)
+    # Sync payments: when a bill is created as Paid, mark member's Due/Overdue payments (up to invoice total) as Paid so member Payments tab reflects automatically
+    member_id = body.member_id
+    inv_total = body.total
+    if member_id and inv_total > 0:
+        pay_q = {"member_id": member_id, "status": {"$in": ["Due", "Overdue"]}}
+        pay_q.update(_gym_filter(gym_id))
+        cursor = payments_collection.find(pay_q).sort("created_at", 1)
+        remaining = inv_total
+        ids_to_mark = []
+        async for p in cursor:
+            if remaining <= 0:
+                break
+            amt = p.get("amount") or 0
+            if amt <= remaining:
+                ids_to_mark.append(p["_id"])
+                remaining -= amt
+        if ids_to_mark:
+            await payments_collection.update_many(
+                {"_id": {"$in": ids_to_mark}, **_gym_filter(gym_id)},
+                {"$set": {"status": "Paid", "paid_at": pay_dt}},
+            )
     return InvoiceResponse(
         id=str(inv_result.inserted_id),
         member_id=body.member_id,
@@ -2441,6 +2480,10 @@ async def billing_create(body: CreateBillRequest, gym_id: str = Depends(get_gym_
         bill_number=bill_number,
         payment_method=body.payment_method,
         notes=body.notes,
+        end_date=inv_doc.get("end_date"),
+        member_phone=inv_doc.get("member_phone"),
+        member_email=inv_doc.get("member_email"),
+        batch=inv_doc.get("batch"),
     )
 
 
@@ -2565,13 +2608,17 @@ async def billing_history(
             bill_number=doc.get("bill_number"),
             payment_method=doc.get("payment_method"),
             notes=doc.get("notes"),
+            end_date=doc.get("end_date"),
+            member_phone=doc.get("member_phone"),
+            member_email=doc.get("member_email"),
+            batch=doc.get("batch"),
         ))
     return out
 
 
 @app.post("/billing/pay", response_model=InvoiceResponse)
 async def billing_pay(invoice_id: str, background_tasks: BackgroundTasks, gym_id: str = Depends(get_gym_id)):
-    """Mark invoice as paid. Simulated UPI/cash. Sends payment notification."""
+    """Mark invoice as paid. Simulated UPI/cash. Sends payment notification. Also marks corresponding payments as Paid so member Payments tab stays in sync."""
     from bson import ObjectId
     from datetime import timezone
     try:
@@ -2587,7 +2634,28 @@ async def billing_pay(invoice_id: str, background_tasks: BackgroundTasks, gym_id
         raise HTTPException(status_code=400, detail="Already paid")
     now = datetime.now(timezone.utc)
     await invoices_collection.update_one(inv_q, {"$set": {"status": "Paid", "paid_at": now}})
-    member_q = {"_id": ObjectId(doc["member_id"])}
+    member_id = doc["member_id"]
+    inv_total = doc.get("total") or 0
+    # Sync payments collection: mark member's Due/Overdue payments as Paid up to invoice total (oldest first)
+    if member_id and inv_total > 0:
+        pay_q = {"member_id": member_id, "status": {"$in": ["Due", "Overdue"]}}
+        pay_q.update(_gym_filter(gym_id))
+        cursor = payments_collection.find(pay_q).sort("created_at", 1)
+        remaining = inv_total
+        ids_to_mark = []
+        async for p in cursor:
+            if remaining <= 0:
+                break
+            amt = p.get("amount") or 0
+            if amt <= remaining:
+                ids_to_mark.append(p["_id"])
+                remaining -= amt
+        if ids_to_mark:
+            await payments_collection.update_many(
+                {"_id": {"$in": ids_to_mark}, **_gym_filter(gym_id)},
+                {"$set": {"status": "Paid", "paid_at": now}},
+            )
+    member_q = {"_id": ObjectId(member_id)}
     member_q.update(_gym_filter(gym_id))
     member = await members_collection.find_one(member_q)
     if member:
@@ -2605,6 +2673,10 @@ async def billing_pay(invoice_id: str, background_tasks: BackgroundTasks, gym_id
         bill_number=updated.get("bill_number"),
         payment_method=updated.get("payment_method"),
         notes=updated.get("notes"),
+        end_date=updated.get("end_date"),
+        member_phone=updated.get("member_phone"),
+        member_email=updated.get("member_email"),
+        batch=updated.get("batch"),
     )
 
 

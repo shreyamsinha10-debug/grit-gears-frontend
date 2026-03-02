@@ -361,8 +361,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _showMemberEditDialog(BuildContext context, Member m) async {
-    // Fetch dynamic batches from gym settings
+    // Fetch dynamic batches and membership plans from gym settings
     List<String> batchNames = [];
+    List<String> membershipOptions = [];
     try {
       final r = await ApiClient.instance.get('/gym/profile', useCache: false);
       if (r.statusCode >= 200 && r.statusCode < 300) {
@@ -372,10 +373,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
             .map((b) => ((b as Map<String, dynamic>)['name'] as String? ?? '').trim())
             .where((n) => n.isNotEmpty)
             .toList();
+        final plansRaw = data['plans'] as List<dynamic>? ?? [];
+        for (final p in plansRaw) {
+          final map = p as Map<String, dynamic>;
+          if (map['is_active'] != false) {
+            final name = (map['name'] as String? ?? '').trim();
+            if (name.isNotEmpty) membershipOptions.add(name);
+          }
+        }
       }
     } catch (_) {}
     if (m.batch.isNotEmpty && !batchNames.contains(m.batch)) batchNames.insert(0, m.batch);
     if (batchNames.isEmpty) batchNames = ['Morning', 'Evening', 'Ladies'];
+    if (m.membershipType.isNotEmpty && !membershipOptions.contains(m.membershipType)) membershipOptions.insert(0, m.membershipType);
+    if (membershipOptions.isEmpty) membershipOptions = ['Regular', 'PT'];
 
     if (!context.mounted) return;
 
@@ -384,7 +395,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final emailController = TextEditingController(text: m.email);
     String batch = batchNames.contains(m.batch) ? m.batch : batchNames.first;
     String status = m.status;
-    String membershipType = m.membershipType;
+    String membershipType = membershipOptions.contains(m.membershipType) ? m.membershipType : membershipOptions.first;
     final scheduleController = TextEditingController(text: m.workoutSchedule ?? '');
     final dietController = TextEditingController(text: m.dietChart ?? '');
 
@@ -407,10 +418,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 DropdownButtonFormField<String>(
                   value: membershipType,
                   decoration: const InputDecoration(labelText: 'Membership type'),
-                  items: const [
-                    DropdownMenuItem(value: 'Regular', child: Text('Regular')),
-                    DropdownMenuItem(value: 'PT', child: Text('PT')),
-                  ],
+                  items: membershipOptions
+                      .map((name) => DropdownMenuItem(value: name, child: Text(name)))
+                      .toList(),
                   onChanged: (v) => setState(() => membershipType = v ?? membershipType),
                 ),
                 const SizedBox(height: 12),

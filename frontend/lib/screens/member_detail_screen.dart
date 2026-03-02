@@ -28,8 +28,9 @@ import 'login_screen.dart';
 
 /// Shows edit member dialog; returns updated [Member] on save, null on cancel.
 Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
-  // Fetch dynamic batches from gym settings
+  // Fetch dynamic batches and membership plans from gym settings
   List<String> batchNames = [];
+  List<Map<String, dynamic>> planList = [];
   try {
     final r = await ApiClient.instance.get('/gym/profile', useCache: false);
     if (r.statusCode >= 200 && r.statusCode < 300) {
@@ -39,11 +40,25 @@ Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
           .map((b) => ((b as Map<String, dynamic>)['name'] as String? ?? '').trim())
           .where((n) => n.isNotEmpty)
           .toList();
+      final plansRaw = data['plans'] as List<dynamic>? ?? [];
+      for (final p in plansRaw) {
+        final map = p as Map<String, dynamic>;
+        if (map['is_active'] != false) {
+          final name = (map['name'] as String? ?? '').trim();
+          if (name.isNotEmpty) planList.add(map);
+        }
+      }
     }
   } catch (_) {}
   // Always include member's current batch so the dropdown has a valid value
   if (m.batch.isNotEmpty && !batchNames.contains(m.batch)) batchNames.insert(0, m.batch);
   if (batchNames.isEmpty) batchNames = ['Morning', 'Evening', 'Ladies'];
+
+  // Build membership options: active plans first, then ensure current member type is in list, fallback to Regular/PT
+  final planNames = planList.map((p) => (p['name'] as String? ?? '').trim()).where((n) => n.isNotEmpty).toList();
+  List<String> membershipOptions = List.from(planNames);
+  if (m.membershipType.isNotEmpty && !membershipOptions.contains(m.membershipType)) membershipOptions.insert(0, m.membershipType);
+  if (membershipOptions.isEmpty) membershipOptions = ['Regular', 'PT'];
 
   final nameController = TextEditingController(text: m.name);
   final phoneController = TextEditingController(text: m.phone);
@@ -51,7 +66,7 @@ Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
   final addressController = TextEditingController(text: m.address ?? '');
   String batch = batchNames.contains(m.batch) ? m.batch : batchNames.first;
   String status = m.status;
-  String membershipType = m.membershipType;
+  String membershipType = membershipOptions.contains(m.membershipType) ? m.membershipType : membershipOptions.first;
   String? gender = m.gender;
   DateTime? dateOfBirth = m.dateOfBirth != null && m.dateOfBirth!.isNotEmpty ? DateTime.tryParse(m.dateOfBirth!) : null;
   final scheduleController = TextEditingController(text: m.workoutSchedule ?? '');
@@ -107,10 +122,9 @@ Future<Member?> showMemberEditDialog(BuildContext context, Member m) async {
               DropdownButtonFormField<String>(
                 value: membershipType,
                 decoration: const InputDecoration(labelText: 'Membership type'),
-                items: const [
-                  DropdownMenuItem(value: 'Regular', child: Text('Regular')),
-                  DropdownMenuItem(value: 'PT', child: Text('PT')),
-                ],
+                items: membershipOptions
+                    .map((name) => DropdownMenuItem(value: name, child: Text(name)))
+                    .toList(),
                 onChanged: (v) => setDialogState(() => membershipType = v ?? membershipType),
               ),
               const SizedBox(height: 12),
@@ -647,7 +661,11 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
                   },
                   onRemoveIdDocument: () => _updateMemberIdDocument(null, null),
                 ),
-                _PaymentsTab(payments: _payments, loading: _loadingPayments, onRefresh: _loadPayments),
+                _PaymentsTab(
+                  payments: _payments,
+                  loading: _loadingPayments,
+                  onRefresh: _loadPayments,
+                ),
                 _AttendanceTab(
                   stats: _attendanceStats,
                   attendanceList: _attendanceList,
@@ -999,7 +1017,11 @@ class _PaymentsTab extends StatelessWidget {
   final bool loading;
   final VoidCallback onRefresh;
 
-  const _PaymentsTab({required this.payments, required this.loading, required this.onRefresh});
+  const _PaymentsTab({
+    required this.payments,
+    required this.loading,
+    required this.onRefresh,
+  });
 
   @override
   Widget build(BuildContext context) {

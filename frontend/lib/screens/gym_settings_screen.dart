@@ -307,23 +307,6 @@ class _GymSettingsScreenState extends State<GymSettingsScreen> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                Text('Quick set start', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey)),
-                const SizedBox(height: 4),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    ChoiceChip(
-                      label: Text('Midnight (12 am)', style: GoogleFonts.poppins(fontSize: 12)),
-                      selected: startTime.hour == 0 && startTime.minute == 0,
-                      onSelected: (_) => setDialogState(() {
-                        startTime = const TimeOfDay(hour: 0, minute: 0);
-                        endTime = const TimeOfDay(hour: 1, minute: 0);
-                      }),
-                    ),
-                  ],
-                ),
                 const SizedBox(height: 10),
                 Text('Duration from start', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey)),
                 const SizedBox(height: 4),
@@ -735,23 +718,6 @@ class _GymSettingsScreenState extends State<GymSettingsScreen> {
                           if (picked != null) setDialogState(() => endTime = picked);
                         },
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text('Quick set start', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey)),
-                const SizedBox(height: 4),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: [
-                    ChoiceChip(
-                      label: Text('Midnight (12 am)', style: GoogleFonts.poppins(fontSize: 12)),
-                      selected: startTime.hour == 0 && startTime.minute == 0,
-                      onSelected: (_) => setDialogState(() {
-                        startTime = const TimeOfDay(hour: 0, minute: 0);
-                        endTime = const TimeOfDay(hour: 1, minute: 0);
-                      }),
                     ),
                   ],
                 ),

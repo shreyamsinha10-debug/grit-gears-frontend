@@ -117,7 +117,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ? (profile['name'] as String).trim()
         : defaultGymName;
     final bool hasCustomLogo = profile != null && (profile['logo_base64'] as String?)?.trim().isNotEmpty == true;
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        // Back button: go to home (Overview) tab instead of exiting; logout is via dedicated button only.
+        if (_selectedIndex != 0) setState(() => _selectedIndex = 0);
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Row(
           mainAxisSize: MainAxisSize.min,
@@ -221,6 +228,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
+    ),
     );
   }
 

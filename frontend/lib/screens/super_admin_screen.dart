@@ -388,7 +388,9 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
     final padding = LayoutConstants.screenPadding(context);
     final radius = LayoutConstants.cardRadius(context);
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
       backgroundColor: surface,
       appBar: AppBar(
         title: Text('Super Admin', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
@@ -499,6 +501,7 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
                 ],
               ),
             ),
+    ),
     );
   }
 }

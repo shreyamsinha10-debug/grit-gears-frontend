@@ -309,7 +309,9 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
     final radius = LayoutConstants.cardRadius(context);
     final isActive = (status.toLowerCase() == 'active');
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
       backgroundColor: AppTheme.surface,
       appBar: AppBar(
         title: Row(
@@ -807,6 +809,7 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
           ),
         ],
       ),
+    ),
     );
   }
 }
