@@ -77,9 +77,13 @@ app = FastAPI(title="Gym API", lifespan=lifespan)
 raw_origins = (settings.allowed_origins or "").split(",")
 allow_origins = [o.strip() for o in raw_origins if o.strip()]
 
+# Allow any localhost / 127.0.0.1 origin (e.g. Flutter web on random port) so preflight succeeds
+allow_origin_regex = r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
+    allow_origin_regex=allow_origin_regex,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

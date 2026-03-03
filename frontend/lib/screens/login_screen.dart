@@ -296,8 +296,9 @@ class _LoginScreenState extends State<LoginScreen> {
       });
     } catch (e) {
       if (mounted) {
+        final msg = e.toString().split('\n').first;
         setState(() {
-          _error = 'Could not sign in. Check connection.';
+          _error = 'Could not sign in. $msg Use Back → Set server URL for local (e.g. http://127.0.0.1:8000).';
           _loading = false;
         });
       }
@@ -412,6 +413,16 @@ class _LoginScreenState extends State<LoginScreen> {
                   fontSize: 15,
                   color: isDark ? Colors.grey.shade400 : Colors.grey.shade700,
                 ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Server: ${ApiClient.baseUrl}',
+                style: GoogleFonts.poppins(
+                  fontSize: 11,
+                  color: (isDark ? Colors.grey.shade500 : Colors.grey.shade600).withOpacity(0.9),
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 32),
               // Email or Mobile Number
