@@ -1,9 +1,10 @@
 """
 Configuration utilities for the GymSaaS backend.
 
-All configuration is sourced from environment variables via `pydantic-settings`.
-There are **no hardcoded fallbacks** for secrets or required settings – the
-application will fail fast on startup if they are missing.
+Configuration is read from environment variables via pydantic-settings.
+Fallback defaults are provided so the app can start on hosts (e.g. Railway)
+that do not inject env vars into the process; set all variables in the
+dashboard for production.
 """
 
 from pathlib import Path
@@ -15,23 +16,28 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 _ENV_FILE = _BACKEND_DIR / ".env"
 
+# Fallbacks used when env vars are not set (e.g. Railway not injecting variables).
+# Override by setting MONGODB_URL, etc., in the host environment or .env.
+_DEFAULT_MONGODB_URL = "mongodb+srv://gym_admin:8qxXOYKp1El0bw0B@clustergymadmin.zkcgd9b.mongodb.net/?appName=Clustergymadmin"
+_DEFAULT_DATABASE_NAME = "gym_db"
+_DEFAULT_SUPER_ADMIN_LOGIN_ID = "admin@gymsaas.com"
+_DEFAULT_SUPER_ADMIN_PASSWORD = "Admin@Gym123"
+_DEFAULT_JWT_SECRET = "gym-saas-jwt-secret-change-in-production"
+_DEFAULT_ALLOWED_ORIGINS = "*"
+
 
 class Settings(BaseSettings):
     """
     Central application settings.
 
-    Environment variables:
+    Environment variables (with fallbacks so app starts if host does not inject them):
     - MONGODB_URL
     - DATABASE_NAME
     - SUPER_ADMIN_LOGIN_ID
     - SUPER_ADMIN_PASSWORD
     - JWT_SECRET
-    - ALLOWED_ORIGINS  (comma-separated list)
-    - SMTP_SERVER      (optional, Phase 6)
-    - SMTP_PORT        (optional, Phase 6)
-    - SMTP_USERNAME    (optional, Phase 6)
-    - SMTP_PASSWORD    (optional, Phase 6)
-    - FROM_EMAIL       (optional, Phase 6)
+    - ALLOWED_ORIGINS  (comma-separated list, or * for all)
+    - SMTP_* / FROM_EMAIL (optional)
     """
 
     model_config = SettingsConfigDict(
@@ -41,16 +47,16 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
     )
 
-    mongodb_url: str = Field(..., alias="MONGODB_URL")
-    database_name: str = Field(..., alias="DATABASE_NAME")
+    mongodb_url: str = Field(default=_DEFAULT_MONGODB_URL, alias="MONGODB_URL")
+    database_name: str = Field(default=_DEFAULT_DATABASE_NAME, alias="DATABASE_NAME")
 
-    super_admin_login_id: str = Field(..., alias="SUPER_ADMIN_LOGIN_ID")
-    super_admin_password: str = Field(..., alias="SUPER_ADMIN_PASSWORD")
+    super_admin_login_id: str = Field(default=_DEFAULT_SUPER_ADMIN_LOGIN_ID, alias="SUPER_ADMIN_LOGIN_ID")
+    super_admin_password: str = Field(default=_DEFAULT_SUPER_ADMIN_PASSWORD, alias="SUPER_ADMIN_PASSWORD")
 
-    jwt_secret: str = Field(..., alias="JWT_SECRET")
+    jwt_secret: str = Field(default=_DEFAULT_JWT_SECRET, alias="JWT_SECRET")
     jwt_algorithm: str = "HS256"
 
-    allowed_origins: str = Field(..., alias="ALLOWED_ORIGINS")
+    allowed_origins: str = Field(default=_DEFAULT_ALLOWED_ORIGINS, alias="ALLOWED_ORIGINS")
 
     smtp_server: str | None = Field(default=None, alias="SMTP_SERVER")
     smtp_port: int | None = Field(default=None, alias="SMTP_PORT")

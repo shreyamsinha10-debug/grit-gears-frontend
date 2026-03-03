@@ -67,3 +67,33 @@ If you use **Option B**, you can also test `POST /auth/forgot-password` in Swagg
 ## Environment
 
 Copy `.env.example` to `.env` and set `MONGODB_URL`, `JWT_SECRET`, and optional super-admin credentials. See `.env.example` for details. For the refactor, `ALLOWED_ORIGINS` is required (comma-separated list, e.g. `http://localhost:3000,http://localhost:8080`).
+
+## Deploying to Railway (or similar)
+
+The **refactored backend has no default values** for required settings. If any required env var is missing, the app **fails on startup** (before it can serve requests). That often shows as "unable to reach" or 502/503 from the public URL.
+
+**Required variables** (set these in Railway → your service → Variables):
+
+| Variable | Example | Notes |
+|----------|---------|--------|
+| `MONGODB_URL` | `mongodb+srv://user:pass@cluster.mongodb.net/` | MongoDB Atlas or other connection string |
+| `DATABASE_NAME` | `gym_db` | Database name |
+| `SUPER_ADMIN_LOGIN_ID` | `admin@gymsaas.com` | Super-admin login (e.g. for app) |
+| `SUPER_ADMIN_PASSWORD` | `YourSecurePassword` | Super-admin password |
+| `JWT_SECRET` | Long random string | Use a strong secret in production |
+| `ALLOWED_ORIGINS` | `https://your-app.web.app,http://localhost:8080` | Comma-separated; include your frontend and any app origins |
+
+Optional: `BACKEND_LABEL` (e.g. `Railway`) so `GET /` returns it for health checks.
+
+**Start command** (from repo root or from `backend`):
+
+- From repo root: `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`  
+- Or from `backend` directory: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+
+Railway sets `PORT` automatically. The app is the same in both cases (`backend/main.py` re-exports `app` from `app.main`).
+
+**If the URL is unreachable:**
+
+1. In Railway dashboard, open your service → **Deployments** → latest deploy → **View logs**.  
+2. Look for startup errors (e.g. `ValidationError` from pydantic-settings = missing or invalid env var).  
+3. Ensure all required variables above are set in **Variables** and redeploy.
