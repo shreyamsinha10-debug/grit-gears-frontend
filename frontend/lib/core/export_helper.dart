@@ -1,18 +1,17 @@
 // ---------------------------------------------------------------------------
-// Export helper – download Excel exports from backend and save to device.
+// Export helper – download Excel exports from backend and save (web-safe).
 // ---------------------------------------------------------------------------
-// Used when admin taps "Export" for members, payments, or billing. Writes
-// response bytes to Downloads (or app documents) and returns the file path.
+// Uses file_saver package: works on web (trigger download) and mobile
+// (saves to Downloads/app directory). No dart:io.
 // ---------------------------------------------------------------------------
 
-import 'dart:io';
-
-import 'package:path_provider/path_provider.dart';
+import 'package:file_saver/file_saver.dart';
+import 'package:flutter/foundation.dart';
 
 import 'api_client.dart';
 
-/// Downloads an export file from the API and saves it to Downloads (or app documents).
-/// Returns the save path on success, null on failure.
+/// Downloads an export file from the API and saves it (web: download, mobile: Downloads).
+/// Returns a non-null label on success (e.g. filename), null on failure.
 Future<String?> saveExportToDownloads(String path, String filename) async {
   try {
     final response = await ApiClient.instance.get(path, useCache: false);
@@ -22,28 +21,26 @@ Future<String?> saveExportToDownloads(String path, String filename) async {
     final bytes = response.bodyBytes;
     if (bytes.isEmpty) return null;
 
-    Directory dir;
-    try {
-      final d = await getDownloadsDirectory();
-      dir = d ?? await getApplicationDocumentsDirectory();
-    } catch (_) {
-      dir = await getApplicationDocumentsDirectory();
-    }
+    final name = filename.contains('.') ? filename.split('.').first : filename;
+    final ext = filename.contains('.') ? filename.split('.').last : 'xlsx';
+    final mimeType = ext == 'xlsx' || ext == 'xls'
+        ? MimeType.microsoftExcel
+        : (ext == 'csv' ? MimeType.csv : MimeType.other);
 
-    final file = File('${dir.path}/$filename');
-    await file.writeAsBytes(bytes);
-    return file.path;
+    await FileSaver.instance.saveFile(
+      name: name,
+      bytes: Uint8List.fromList(bytes),
+      fileExtension: ext,
+      mimeType: mimeType,
+    );
+    return filename;
   } catch (_) {
     return null;
   }
 }
 
-/// User-facing label for the save location (e.g. "Downloads" or "Documents").
+/// User-facing label for the save location.
 Future<String> exportLocationLabel() async {
-  try {
-    final d = await getDownloadsDirectory();
-    return d != null ? 'Downloads' : 'Documents';
-  } catch (_) {
-    return 'Documents';
-  }
+  if (kIsWeb) return 'Downloads';
+  return 'Downloads';
 }

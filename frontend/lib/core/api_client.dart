@@ -2,14 +2,17 @@
 // API client – single HTTP client for all backend calls.
 // ---------------------------------------------------------------------------
 // Use [ApiClient.instance] for GET/POST. Handles base URL (env or saved),
-// timeouts, optional GET cache, and DNS fallback (DoH) when device DNS fails.
+// timeouts, optional GET cache. On mobile, DNS fallback (DoH) when device DNS fails.
+// No dart:io so web builds are safe.
 // ---------------------------------------------------------------------------
 
 import 'dart:convert';
-import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+
+import '../models/models.dart';
+
+import 'api_network_fallback_stub.dart' if (dart.library.io) 'api_network_fallback_io.dart' as network_fallback;
 
 /// Enterprise-grade API client: connection reuse, timeouts, optional GET cache.
 /// Use [ApiClient.instance] everywhere instead of raw [http.get] for faster loads.
@@ -83,8 +86,6 @@ class ApiClient {
   static const Duration receiveTimeout = Duration(seconds: 25);
   static const Duration cacheTtl = Duration(seconds: 90);
 
-  static const _dohUrl = 'https://dns.google/resolve';
-
   http.Client? _client;
   final Map<String, _CacheEntry> _getCache = {};
 
@@ -94,7 +95,6 @@ class ApiClient {
   }
 
   Uri get _baseUri => Uri.parse(baseUrl);
-  String get _host => _baseUri.host;
   bool get _isHttps => _baseUri.scheme == 'https';
 
   bool _isLookupError(Object e) {
@@ -102,43 +102,10 @@ class ApiClient {
     return s.contains('host lookup') ||
         s.contains('no address associated') ||
         s.contains('errno = 7') ||
-        (e is SocketException && (e.osError?.errorCode == 7 || e.message.contains('lookup')));
+        s.contains('lookup');
   }
 
-  /// Resolve host to IP via Google DNS-over-HTTPS. Returns null if DoH fails (e.g. no network).
-  Future<String?> _resolveViaDoH(String host) async {
-    try {
-      final uri = Uri.parse('$_dohUrl?name=${Uri.encodeComponent(host)}&type=A');
-      final c = http.Client();
-      try {
-        final r = await c.get(uri).timeout(const Duration(seconds: 10));
-        c.close();
-        if (r.statusCode != 200) return null;
-        final map = jsonDecode(r.body) as Map<String, dynamic>?;
-        final answer = map?['Answer'] as List<dynamic>?;
-        if (answer == null || answer.isEmpty) return null;
-        final data = (answer.first as Map<String, dynamic>)['data'] as String?;
-        return data?.trim();
-      } catch (_) {
-        c.close();
-        return null;
-      }
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<String?> _resolveHost() async {
-    final host = _host;
-    if (host.isEmpty) return null;
-    if (_hostToIp.containsKey(host)) return _hostToIp[host];
-    final ip = await _resolveViaDoH(host);
-    if (ip != null) _hostToIp[host] = ip;
-    return ip;
-  }
-
-  /// Perform one request via resolved IP (HTTPS only), with Host header and cert check for intended hostname.
-  Future<http.Response> _requestViaIp({
+  Future<http.Response?> _requestViaIp({
     required String method,
     required String path,
     Map<String, String>? queryParameters,
@@ -146,62 +113,18 @@ class ApiClient {
     Object? body,
     Encoding? encoding,
   }) async {
-    final host = _host;
-    final ip = await _resolveHost();
-    if (ip == null || ip.isEmpty) throw SocketException('Could not resolve host via DoH', osError: OSError('No address', 7));
-
-    final pathWithQuery = queryParameters != null && queryParameters.isNotEmpty
-        ? path + '?' + queryParameters.entries.map((e) => '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}').join('&')
-        : path;
-    final uri = Uri.parse('https://$ip$pathWithQuery');
-
-    final client = HttpClient()
-      ..connectionTimeout = connectTimeout
-      ..idleTimeout = receiveTimeout;
-    try {
-      client.badCertificateCallback = (X509Certificate cert, String host, int port) {
-        final sub = cert.subject.toLowerCase();
-        return sub.contains(host.toLowerCase()) ||
-            host.toLowerCase().contains('.railway.app') ||
-            sub.contains('railway');
-      };
-
-      HttpClientRequest req;
-      switch (method.toUpperCase()) {
-        case 'GET':
-          req = await client.getUrl(uri);
-          break;
-        case 'POST':
-          req = await client.postUrl(uri);
-          break;
-        case 'PATCH':
-          req = await client.patchUrl(uri);
-          break;
-        case 'DELETE':
-          req = await client.deleteUrl(uri);
-          break;
-        default:
-          req = await client.getUrl(uri);
-      }
-
-      req.headers.set('Host', host);
-      if (headers != null) {
-        for (final e in headers.entries) {
-          req.headers.set(e.key, e.value);
-        }
-      }
-      if (body != null && (method == 'POST' || method == 'PATCH')) {
-        final bytes = encoding == null ? utf8.encode(body.toString()) : encoding.encode(body.toString());
-        req.contentLength = bytes.length;
-        req.add(bytes);
-      }
-
-      final response = await req.close();
-      final bodyBytes = await consolidateHttpClientResponseBytes(response);
-      return http.Response.bytes(bodyBytes, response.statusCode);
-    } finally {
-      client.close();
-    }
+    return network_fallback.requestViaIp(
+      baseUrl: baseUrl,
+      path: path,
+      method: method,
+      queryParameters: queryParameters,
+      headers: headers,
+      body: body,
+      encoding: encoding,
+      connectTimeout: connectTimeout,
+      receiveTimeout: receiveTimeout,
+      hostToIp: _hostToIp,
+    );
   }
 
   Future<http.Response> get(
@@ -238,14 +161,14 @@ class ApiClient {
     } catch (e) {
       if (_isHttps && _isLookupError(e)) {
         final fallback = await _requestViaIp(method: 'GET', path: path, queryParameters: queryParameters, headers: _authHeaders(headers));
-        if (useCache && headers == null && fallback.statusCode >= 200 && fallback.statusCode < 300) {
+        if (fallback != null && useCache && headers == null && fallback.statusCode >= 200 && fallback.statusCode < 300) {
           _getCache[key] = _CacheEntry(
             body: fallback.body,
             statusCode: fallback.statusCode,
             cachedAt: DateTime.now(),
           );
         }
-        return fallback;
+        if (fallback != null) return fallback;
       }
       rethrow;
     }
@@ -266,8 +189,10 @@ class ApiClient {
     } catch (e) {
       if (_isHttps && _isLookupError(e)) {
         final r = await _requestViaIp(method: 'POST', path: path, headers: _authHeaders(headers), body: body, encoding: encoding);
-        _clearCache();
-        return r;
+        if (r != null) {
+          _clearCache();
+          return r;
+        }
       }
       rethrow;
     }
@@ -288,8 +213,10 @@ class ApiClient {
     } catch (e) {
       if (_isHttps && _isLookupError(e)) {
         final r = await _requestViaIp(method: 'PATCH', path: path, headers: _authHeaders(headers), body: body, encoding: encoding);
-        _clearCache();
-        return r;
+        if (r != null) {
+          _clearCache();
+          return r;
+        }
       }
       rethrow;
     }
@@ -324,8 +251,10 @@ class ApiClient {
     } catch (e) {
       if (_isHttps && _isLookupError(e)) {
         final r = await _requestViaIp(method: 'DELETE', path: path, headers: _authHeaders(null));
-        _clearCache();
-        return r;
+        if (r != null) {
+          _clearCache();
+          return r;
+        }
       }
       rethrow;
     }
@@ -341,6 +270,33 @@ class ApiClient {
     _client?.close();
     _client = null;
     _clearCache();
+  }
+
+  // --- Typed response parsers (use with response.body when statusCode is 2xx) ---
+
+  static Member parseMember(String body) {
+    return Member.fromJson(jsonDecode(body) as Map<String, dynamic>);
+  }
+
+  static List<Member> parseMembers(String body) {
+    final list = jsonDecode(body) as List<dynamic>? ?? [];
+    return list.map((e) => Member.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  static GymProfile parseGymProfile(String body) {
+    return GymProfile.fromJson(jsonDecode(body) as Map<String, dynamic>);
+  }
+
+  static List<Payment> parsePayments(String body) {
+    return Payment.fromJsonList(jsonDecode(body));
+  }
+
+  static List<Invoice> parseInvoices(String body) {
+    return Invoice.fromJsonList(jsonDecode(body));
+  }
+
+  static List<AttendanceRecord> parseAttendanceRecords(String body) {
+    return AttendanceRecord.fromJsonList(jsonDecode(body));
   }
 }
 

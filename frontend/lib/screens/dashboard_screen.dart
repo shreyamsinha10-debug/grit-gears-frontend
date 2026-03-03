@@ -14,10 +14,13 @@ import 'package:flutter/services.dart';
 
 import '../core/api_client.dart';
 import '../core/date_utils.dart';
+import '../models/models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/animated_fade.dart';
 import '../widgets/skeleton_loading.dart';
 import 'attendance_report_screen.dart';
+
+export '../models/models.dart' show Member;
 
 // ---------------------------------------------------------------------------
 // Session-level avatar cache — each photo is fetched at most once per session.
@@ -79,87 +82,6 @@ class _MemberAvatarWidgetState extends State<_MemberAvatarWidget> {
   }
 }
 
-class Member {
-  final String id;
-  final String name;
-  final String phone;
-  final String email;
-  final String membershipType;
-  final String batch;
-  final String status;
-  final String? address;
-  final String? dateOfBirth;  // YYYY-MM-DD from API
-  final String? gender;
-  final String? workoutSchedule;
-  final String? dietChart;
-  final String? photoBase64;
-  final String? idDocumentBase64;
-  final String? idDocumentType;  // Aadhar, Driving Licence, Voter ID, Passport
-  final DateTime? createdAt;
-  final DateTime? lastAttendanceDate;
-  final bool? isCheckedInToday;
-  final bool? isCheckedOutToday;
-
-  Member({
-    required this.id,
-    required this.name,
-    required this.phone,
-    required this.email,
-    required this.membershipType,
-    required this.batch,
-    required this.status,
-    this.address,
-    this.dateOfBirth,
-    this.gender,
-    this.workoutSchedule,
-    this.dietChart,
-    this.photoBase64,
-    this.idDocumentBase64,
-    this.idDocumentType,
-    this.createdAt,
-    this.lastAttendanceDate,
-    this.isCheckedInToday,
-    this.isCheckedOutToday,
-  });
-
-  factory Member.fromJson(Map<String, dynamic> json) {
-    final createdAt = parseApiDateTime(json['created_at']?.toString());
-    final lastAttendanceDate = parseApiDate(json['last_attendance_date']?.toString());
-    
-    bool? isCheckedIn;
-    bool? isCheckedOut;
-    try {
-      final todayStatus = json['today_status'] as Map<String, dynamic>?;
-      if (todayStatus != null) {
-        isCheckedIn = todayStatus['checked_in'] as bool?;
-        isCheckedOut = todayStatus['checked_out'] as bool?;
-      }
-    } catch (_) {}
-
-    return Member(
-      id: json['id'] as String? ?? '',
-      name: json['name'] as String? ?? '',
-      phone: json['phone'] as String? ?? '',
-      email: json['email'] as String? ?? '',
-      membershipType: json['membership_type'] as String? ?? '',
-      batch: json['batch'] as String? ?? '',
-      status: json['status'] as String? ?? 'Active',
-      address: json['address'] as String?,
-      dateOfBirth: json['date_of_birth'] as String?,
-      gender: json['gender'] as String?,
-      workoutSchedule: json['workout_schedule'] as String?,
-      dietChart: json['diet_chart'] as String?,
-      photoBase64: json['photo_base64'] as String?,
-      idDocumentBase64: json['id_document_base64'] as String?,
-      idDocumentType: json['id_document_type'] as String?,
-      createdAt: createdAt,
-      lastAttendanceDate: lastAttendanceDate,
-      isCheckedInToday: isCheckedIn,
-      isCheckedOutToday: isCheckedOut,
-    );
-  }
-}
-
 class DashboardScreen extends StatefulWidget {
   final bool isEmbedded;
   final String? searchQuery;
@@ -213,8 +135,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (!mounted) return;
 
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        final list = jsonDecode(response.body) as List<dynamic>;
-        final newMembers = list.map((e) => Member.fromJson(e as Map<String, dynamic>)).toList();
+        final newMembers = ApiClient.parseMembers(response.body);
         setState(() {
           if (append) {
             _members = [..._members, ...newMembers];

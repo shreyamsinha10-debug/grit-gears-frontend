@@ -129,7 +129,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (hasCustomLogo && profile != null)
+            if (hasCustomLogo)
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: Image.memory(
@@ -1092,6 +1092,8 @@ class _FeesTabState extends State<_FeesTab> {
     return AppTheme.primary;
   }
 
+  // Kept for future use when editing payment status from the payments list.
+  // ignore: unused_element
   static void _showEditPaymentStatus(BuildContext context, Map<String, dynamic> payment, VoidCallback onSuccess) {
     String selected = payment['status'] as String? ?? 'Due';
     showDialog(

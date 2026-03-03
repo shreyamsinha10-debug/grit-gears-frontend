@@ -7,7 +7,6 @@
 // ---------------------------------------------------------------------------
 
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -43,7 +42,6 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   List<Map<String, dynamic>> _plans = [];
   /// Batches from gym profile: { name, start_time?, end_time? }. Used for Batch dropdown when non-empty.
   List<Map<String, dynamic>> _batches = [];
-  bool _plansLoaded = false;
 
   final ImagePicker _imagePicker = ImagePicker();
 
@@ -98,13 +96,12 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
           } else if (_batches.isEmpty) {
             _batch = 'Morning'; // Fallback if no batches exist
           }
-          _plansLoaded = true;
         });
       } else {
-        setState(() => _plansLoaded = true);
+        setState(() {});
       }
     } catch (_) {
-      if (mounted) setState(() => _plansLoaded = true);
+      if (mounted) setState(() {});
     }
   }
 
@@ -166,11 +163,6 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
       if (result == null || result.files.isEmpty || !mounted) return;
       final file = result.files.single;
       List<int>? bytes = file.bytes;
-      if (bytes == null && file.path != null) {
-        try {
-          bytes = await File(file.path!).readAsBytes();
-        } catch (_) {}
-      }
       if (bytes == null) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not read file')));
         return;

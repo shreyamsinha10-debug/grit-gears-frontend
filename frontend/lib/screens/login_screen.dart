@@ -13,6 +13,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../core/api_client.dart';
 import '../core/secure_storage.dart';
+import '../models/models.dart';
 import '../theme/app_theme.dart';
 import 'admin_dashboard_screen.dart';
 import 'member_home_screen.dart';
@@ -251,9 +252,10 @@ class _LoginScreenState extends State<LoginScreen> {
           if (!mounted) return;
           setState(() => _loading = false);
           if (memberMap != null) {
+            final member = Member.fromJson(memberMap);
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (_) => MemberHomeScreen(member: memberMap)),
+              MaterialPageRoute(builder: (_) => MemberHomeScreen(member: member)),
             );
           } else {
             setState(() => _error = 'Member data missing');
@@ -278,7 +280,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       if (r.statusCode >= 200 && r.statusCode < 300) {
-        final member = jsonDecode(r.body) as Map<String, dynamic>;
+        final member = ApiClient.parseMember(r.body);
         setState(() => _loading = false);
         if (!mounted) return;
         Navigator.pushReplacement(

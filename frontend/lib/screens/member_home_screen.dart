@@ -7,7 +7,6 @@
 // ---------------------------------------------------------------------------
 
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -16,8 +15,10 @@ import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 
 import '../core/api_client.dart';
+import '../core/date_utils.dart';
 import '../core/image_compression.dart';
 import '../core/secure_storage.dart';
+import '../models/models.dart';
 import '../widgets/skeleton_loading.dart';
 import '../widgets/attendance_stats_card.dart';
 import '../theme/app_theme.dart';
@@ -25,7 +26,7 @@ import 'login_screen.dart';
 import 'member_inbox_screen.dart';
 
 class MemberHomeScreen extends StatefulWidget {
-  final Map<String, dynamic> member;
+  final Member member;
 
   const MemberHomeScreen({super.key, required this.member});
 
@@ -42,7 +43,7 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
   bool _checkedOutToday = false;
   final GlobalKey _inboxKey = GlobalKey();
   /// Full member (photo, id_document) from GET /members/{id}; null until loaded.
-  Map<String, dynamic>? _fullMember;
+  Member? _fullMember;
   final ImagePicker _imagePicker = ImagePicker();
   Map<String, dynamic>? _attendanceStats;
   bool _loadingStats = true;
@@ -51,11 +52,8 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
   @override
   void initState() {
     super.initState();
-    final todayStatus = widget.member['today_status'] as Map<String, dynamic>?;
-    if (todayStatus != null) {
-      _checkedInToday = todayStatus['checked_in'] == true;
-      _checkedOutToday = todayStatus['checked_out'] == true;
-    }
+    _checkedInToday = widget.member.isCheckedInToday ?? false;
+    _checkedOutToday = widget.member.isCheckedOutToday ?? false;
     _loadPayments();
     _loadFullMember();
     _loadStats();
@@ -73,8 +71,8 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
   }
 
   Future<void> _loadStats() async {
-    final mid = widget.member['id'] as String?;
-    if (mid == null) return;
+    final mid = widget.member.id;
+    if (mid.isEmpty) return;
     setState(() => _loadingStats = true);
     try {
       final r = await ApiClient.instance.get('/members/$mid/attendance-stats', useCache: false);
@@ -105,19 +103,15 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
   }
 
   Future<void> _loadFullMember() async {
-    final mid = widget.member['id'] as String?;
-    if (mid == null) return;
+    final mid = widget.member.id;
+    if (mid.isEmpty) return;
     try {
       final r = await ApiClient.instance.get('/members/$mid', useCache: false);
       if (mounted && r.statusCode == 200) {
-        final map = jsonDecode(r.body) as Map<String, dynamic>?;
         setState(() {
-          _fullMember = map;
-          final todayStatus = map?['today_status'] as Map<String, dynamic>?;
-          if (todayStatus != null) {
-            _checkedInToday = todayStatus['checked_in'] == true;
-            _checkedOutToday = todayStatus['checked_out'] == true;
-          }
+          _fullMember = ApiClient.parseMember(r.body);
+          _checkedInToday = _fullMember?.isCheckedInToday ?? false;
+          _checkedOutToday = _fullMember?.isCheckedOutToday ?? false;
         });
       } else if (mounted && r.statusCode == 403) {
         final body = jsonDecode(r.body) as Map<String, dynamic>?;
@@ -150,9 +144,6 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
     if (result == null || result.files.isEmpty) return null;
     final file = result.files.single;
     List<int>? bytes = file.bytes;
-    if (bytes == null && file.path != null) {
-      try { bytes = await File(file.path!).readAsBytes(); } catch (_) {}
-    }
     if (bytes == null) return null;
     final bytesList = Uint8List.fromList(bytes);
     final toEncode = isCompressibleImage(bytesList) ? compressImageToMaxBytes(bytesList) : bytesList;
@@ -173,8 +164,8 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
   }
 
   Future<void> _updatePhoto(String? base64) async {
-    final mid = widget.member['id'] as String?;
-    if (mid == null) return;
+    final mid = widget.member.id;
+    if (mid.isEmpty) return;
     try {
       final r = await ApiClient.instance.patch(
         '/members/$mid/photo',
@@ -188,8 +179,8 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
   }
 
   Future<void> _updateIdDocument(String? base64, String? type) async {
-    final mid = widget.member['id'] as String?;
-    if (mid == null) return;
+    final mid = widget.member.id;
+    if (mid.isEmpty) return;
     try {
       final body = <String, dynamic>{'id_document_base64': base64};
       if (type != null) body['id_document_type'] = type;
@@ -212,8 +203,8 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
   }
 
   Future<void> _checkInSelf() async {
-    final mid = widget.member['id'] as String?;
-    if (mid == null || _checkingIn) return;
+    final mid = widget.member.id;
+    if (mid.isEmpty || _checkingIn) return;
     setState(() => _checkingIn = true);
     try {
       final r = await ApiClient.instance.post('/attendance/check-in/$mid');
@@ -244,8 +235,8 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
   }
 
   Future<void> _checkOutSelf() async {
-    final mid = widget.member['id'] as String?;
-    if (mid == null || _checkingOut) return;
+    final mid = widget.member.id;
+    if (mid.isEmpty || _checkingOut) return;
     setState(() => _checkingOut = true);
     try {
       final r = await ApiClient.instance.post('/attendance/check-out/$mid');
@@ -272,8 +263,8 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
   }
 
   Future<void> _loadPayments() async {
-    final mid = widget.member['id'] as String?;
-    if (mid == null) return;
+    final mid = widget.member.id;
+    if (mid.isEmpty) return;
     setState(() => _loadingPayments = true);
     try {
       final r = await ApiClient.instance.get('/payments', queryParameters: {'member_id': mid}, useCache: false);
@@ -285,7 +276,7 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
     }
   }
 
-  bool get _isPT => (widget.member['membership_type'] as String? ?? '').toLowerCase() == 'pt';
+  bool get _isPT => widget.member.membershipType.toLowerCase() == 'pt';
 
   List<Map<String, dynamic>> get _duePayments {
     return _payments
@@ -299,12 +290,12 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final m = _fullMember ?? widget.member;
-    final name = m['name'] as String? ?? '';
-    final batch = m['batch'] as String? ?? '';
-    final status = m['status'] as String? ?? 'Active';
-    final lastAttendance = m['last_attendance_date'] as String? ?? '';
-    final workoutSchedule = m['workout_schedule'] as String? ?? '';
-    final dietChart = m['diet_chart'] as String? ?? '';
+    final name = m.name;
+    final batch = m.batch;
+    final status = m.status;
+    final lastAttendance = m.lastAttendanceDate != null ? formatDisplayDate(m.lastAttendanceDate) : '';
+    final workoutSchedule = m.workoutSchedule ?? '';
+    final dietChart = m.dietChart ?? '';
     final padding = LayoutConstants.screenPadding(context);
     final radius = LayoutConstants.cardRadius(context);
     final isActive = (status.toLowerCase() == 'active');
@@ -426,11 +417,11 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
                             radius: 36,
                             backgroundColor: AppTheme.primary.withOpacity(0.2),
                             foregroundColor: AppTheme.primary,
-                            backgroundImage: _fullMember?['photo_base64'] != null
-                                ? MemoryImage(base64Decode(_fullMember!['photo_base64'] as String))
+                            backgroundImage: _fullMember?.photoBase64 != null && _fullMember!.photoBase64!.isNotEmpty
+                                ? MemoryImage(base64Decode(_fullMember!.photoBase64!))
                                 : null,
-                            onBackgroundImageError: _fullMember?['photo_base64'] != null ? (_, __) {} : null,
-                            child: _fullMember?['photo_base64'] == null
+                            onBackgroundImageError: _fullMember?.photoBase64 != null && _fullMember!.photoBase64!.isNotEmpty ? (_, __) {} : null,
+                            child: _fullMember?.photoBase64 == null || _fullMember!.photoBase64!.isEmpty
                                 ? Text((name.isNotEmpty ? name[0] : '?').toUpperCase(), style: GoogleFonts.poppins(fontSize: 28, fontWeight: FontWeight.bold))
                                 : null,
                           ),
@@ -453,7 +444,7 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
                                       style: FilledButton.styleFrom(backgroundColor: AppTheme.primary.withOpacity(0.15), foregroundColor: AppTheme.primary),
                                       child: const Text('Change'),
                                     ),
-                                    if (_fullMember?['photo_base64'] != null)
+                                    if (_fullMember?.photoBase64 != null && _fullMember!.photoBase64!.isNotEmpty)
                                       OutlinedButton(
                                         onPressed: () => _updatePhoto(null),
                                         style: OutlinedButton.styleFrom(foregroundColor: AppTheme.error, side: const BorderSide(color: AppTheme.error)),
@@ -464,7 +455,7 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
                                 const SizedBox(height: 16),
                                 Row(
                                   children: [
-                                    if (_fullMember?['id_document_base64'] != null) ...[
+                                    if (_fullMember?.idDocumentBase64 != null) ...[
                                       GestureDetector(
                                         onTap: () => showDialog(
                                           context: context,
@@ -475,7 +466,7 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
                                               clipBehavior: Clip.none,
                                               maxScale: 5.0,
                                               child: Image.memory(
-                                                base64Decode(_fullMember!['id_document_base64'] as String),
+                                                base64Decode(_fullMember!.idDocumentBase64!),
                                                 fit: BoxFit.contain,
                                               ),
                                             ),
@@ -488,7 +479,7 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
                                             borderRadius: BorderRadius.circular(6),
                                             border: Border.all(color: Colors.grey.shade300),
                                             image: DecorationImage(
-                                              image: MemoryImage(base64Decode(_fullMember!['id_document_base64'] as String)),
+                                              image: MemoryImage(base64Decode(_fullMember!.idDocumentBase64!)),
                                               fit: BoxFit.cover,
                                             ),
                                           ),
@@ -498,8 +489,8 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
                                     ],
                                     Expanded(
                                       child: Text(
-                                        _fullMember?['id_document_base64'] != null
-                                            ? 'ID: ${_fullMember!['id_document_type'] ?? 'Uploaded'}'
+                                        _fullMember?.idDocumentBase64 != null
+                                            ? 'ID: ${_fullMember!.idDocumentType ?? 'Uploaded'}'
                                             : 'Identity document',
                                         style: GoogleFonts.poppins(fontSize: 14, color: AppTheme.onSurface),
                                       ),
@@ -517,9 +508,9 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
                                         if (pair != null) await _updateIdDocument(pair.$1, pair.$2);
                                       },
                                       style: FilledButton.styleFrom(backgroundColor: AppTheme.primary.withOpacity(0.15), foregroundColor: AppTheme.primary),
-                                      child: Text(_fullMember?['id_document_base64'] != null ? 'Re-upload' : 'Upload'),
+                                      child: Text(_fullMember?.idDocumentBase64 != null && _fullMember!.idDocumentBase64!.isNotEmpty ? 'Re-upload' : 'Upload'),
                                     ),
-                                    if (_fullMember?['id_document_base64'] != null)
+                                    if (_fullMember?.idDocumentBase64 != null && _fullMember!.idDocumentBase64!.isNotEmpty)
                                       OutlinedButton(
                                         onPressed: () => _updateIdDocument(null, null),
                                         style: OutlinedButton.styleFrom(foregroundColor: AppTheme.error, side: const BorderSide(color: AppTheme.error)),
@@ -794,9 +785,9 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
           FilledButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              final mid = widget.member['id'] as String?;
+              final mid = widget.member.id;
               final pid = payment['id'] as String?;
-              if (mid == null || pid == null) return;
+              if (mid.isEmpty || pid == null) return;
               try {
                 final r = await ApiClient.instance.post('/payments/pay?member_id=$mid&payment_id=$pid');
                 if (mounted && r.statusCode >= 200 && r.statusCode < 300) {

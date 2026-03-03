@@ -187,6 +187,8 @@ class _MyHomePageState extends State<MyHomePage> {
       if (!mounted) return;
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final message = data['message'] as String? ?? 'Gym API is Live!';
+      final backend = data['backend'] as String?;
+      final displayMessage = backend != null ? '$message ($backend)' : message;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -194,7 +196,7 @@ class _MyHomePageState extends State<MyHomePage> {
             children: [
               const Icon(Icons.check_circle, color: Color(0xFF0D0D0D), size: 22),
               const SizedBox(width: 12),
-              Expanded(child: Text(message)),
+              Expanded(child: Text(displayMessage)),
             ],
           ),
         ),

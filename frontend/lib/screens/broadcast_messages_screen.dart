@@ -11,8 +11,8 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../core/api_client.dart';
 import '../core/date_utils.dart';
+import '../models/models.dart';
 import '../theme/app_theme.dart';
-import 'dashboard_screen.dart';
 import 'login_screen.dart';
 
 class BroadcastMessagesScreen extends StatefulWidget {
@@ -83,9 +83,8 @@ class _BroadcastMessagesScreenState extends State<BroadcastMessagesScreen> {
     try {
       final r = await ApiClient.instance.get('/members', queryParameters: {'brief': 'true', 'limit': '500'}, useCache: false);
       if (mounted && r.statusCode >= 200 && r.statusCode < 300) {
-        final list = jsonDecode(r.body) as List<dynamic>? ?? [];
         setState(() {
-          _members = list.map((e) => Member.fromJson(e as Map<String, dynamic>)).toList();
+          _members = ApiClient.parseMembers(r.body);
           _loadingMembers = false;
         });
       } else if (mounted) setState(() => _loadingMembers = false);

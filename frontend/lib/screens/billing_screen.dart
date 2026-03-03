@@ -15,6 +15,7 @@ import '../core/api_client.dart';
 import '../core/date_utils.dart';
 import '../core/export_helper.dart';
 import '../core/pdf_invoice_helper.dart';
+import '../models/models.dart';
 import '../theme/app_theme.dart';
 
 class BillingScreen extends StatefulWidget {
@@ -26,7 +27,7 @@ class BillingScreen extends StatefulWidget {
 
 class _BillingScreenState extends State<BillingScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  List<Map<String, dynamic>> _invoices = [];
+  List<Invoice> _invoices = [];
   bool _loadingInvoices = false;
 
   @override
@@ -51,9 +52,8 @@ class _BillingScreenState extends State<BillingScreen> with SingleTickerProvider
       if (dateTo != null && dateTo.isNotEmpty) params['date_to'] = dateTo;
       final r = await ApiClient.instance.get('/billing/history', queryParameters: params.isEmpty ? null : params, useCache: false);
       if (mounted && r.statusCode == 200) {
-        final list = jsonDecode(r.body) as List<dynamic>;
         setState(() {
-          _invoices = list.map((e) => e as Map<String, dynamic>).toList();
+          _invoices = ApiClient.parseInvoices(r.body);
           _loadingInvoices = false;
         });
       } else if (mounted) setState(() => _loadingInvoices = false);
@@ -113,21 +113,21 @@ class _CreateBillTab extends StatefulWidget {
 
 class _CreateBillTabState extends State<_CreateBillTab> {
   // Data
-  List<Map<String, dynamic>> _members = [];
-  List<Map<String, dynamic>> _plans = [];
+  List<Member> _members = [];
+  List<GymPlan> _plans = [];
   bool _loadingMembers = true;
   bool _loadingPlans = true;
   String _previewBillNo = 'Loading...';
 
   // Member selection
   final _memberSearchController = TextEditingController();
-  Map<String, dynamic>? _selectedMember;
+  Member? _selectedMember;
 
   // Line items
-  final List<Map<String, dynamic>> _items = []; // [{description, amount}]
+  final List<Map<String, dynamic>> _items = []; // [{description, amount, duration_type?}]
 
   // Add-item form
-  Map<String, dynamic>? _addPlan; // selected plan from dropdown
+  GymPlan? _addPlan; // selected plan from dropdown
   final _customDescController = TextEditingController();
   final _customAmountController = TextEditingController();
   bool _addingCustom = false;
@@ -212,9 +212,8 @@ class _CreateBillTabState extends State<_CreateBillTab> {
     try {
       final r = await ApiClient.instance.get('/members', queryParameters: {'brief': 'true', 'limit': '500'}, useCache: true);
       if (mounted && r.statusCode == 200) {
-        final list = jsonDecode(r.body) as List<dynamic>;
         setState(() {
-          _members = list.map((e) => e as Map<String, dynamic>).toList();
+          _members = ApiClient.parseMembers(r.body);
           _loadingMembers = false;
         });
       } else if (mounted) setState(() => _loadingMembers = false);
@@ -228,10 +227,9 @@ class _CreateBillTabState extends State<_CreateBillTab> {
     try {
       final r = await ApiClient.instance.get('/gym/profile', useCache: true);
       if (mounted && r.statusCode == 200) {
-        final body = jsonDecode(r.body) as Map<String, dynamic>;
-        final plans = body['plans'] as List<dynamic>? ?? [];
+        final profile = ApiClient.parseGymProfile(r.body);
         setState(() {
-          _plans = plans.map((e) => e as Map<String, dynamic>).where((p) => p['is_active'] != false).toList();
+          _plans = profile.plans.where((p) => p.isActive).toList();
           _loadingPlans = false;
         });
       } else if (mounted) setState(() => _loadingPlans = false);
@@ -240,12 +238,12 @@ class _CreateBillTabState extends State<_CreateBillTab> {
     }
   }
 
-  List<Map<String, dynamic>> get _filteredMembers {
+  List<Member> get _filteredMembers {
     final q = _memberSearchController.text.trim().toLowerCase();
     if (q.isEmpty) return _members;
     return _members.where((m) {
-      final name = (m['name'] as String? ?? '').toLowerCase();
-      final phone = (m['phone'] as String? ?? '').replaceAll(RegExp(r'\D'), '');
+      final name = m.name.toLowerCase();
+      final phone = m.phone.replaceAll(RegExp(r'\D'), '');
       final digits = q.replaceAll(RegExp(r'\D'), '');
       return name.contains(q) || (digits.isNotEmpty && phone.contains(digits));
     }).toList();
@@ -253,32 +251,32 @@ class _CreateBillTabState extends State<_CreateBillTab> {
 
   int get _total => _items.fold(0, (sum, e) => sum + ((e['amount'] as num?)?.toInt() ?? 0));
 
-  void _selectMember(Map<String, dynamic> m) {
+  void _selectMember(Member m) {
     setState(() {
       _selectedMember = m;
       _memberSearchController.clear();
       _items.clear();
-      _batchController.text = m['batch']?.toString() ?? '';
+      _batchController.text = m.batch;
     });
     // Auto-add a matching plan
     if (_plans.isNotEmpty) {
-      final memberType = (m['membership_type'] as String? ?? '').toLowerCase();
-      Map<String, dynamic>? matched;
+      final memberType = m.membershipType.toLowerCase();
+      GymPlan? matched;
       if (memberType.isNotEmpty) {
         try {
           matched = _plans.firstWhere(
-            (p) => (p['name'] as String? ?? '').toLowerCase().contains(memberType),
+            (p) => p.name.toLowerCase().contains(memberType),
           );
         } catch (_) {}
       }
       matched ??= _plans.first;
-      final price = int.tryParse(matched['price']?.toString() ?? '0') ?? 0;
+      final price = matched.price;
       if (price > 0) {
         setState(() {
           _items.add({
-            'description': matched!['name'] as String? ?? 'Membership Fee',
+            'description': matched!.name,
             'amount': price,
-            'duration_type': matched['duration_type'] as String?,
+            'duration_type': matched.durationType,
           });
         });
       }
@@ -290,12 +288,12 @@ class _CreateBillTabState extends State<_CreateBillTab> {
       _showSnack('Select a plan to add');
       return;
     }
-    final price = int.tryParse(_addPlan!['price']?.toString() ?? '0') ?? 0;
+    final price = _addPlan!.price;
     setState(() {
       _items.add({
-        'description': _addPlan!['name'] as String? ?? 'Plan',
+        'description': _addPlan!.name,
         'amount': price,
-        'duration_type': _addPlan!['duration_type'] as String?,
+        'duration_type': _addPlan!.durationType,
       });
       _addPlan = null;
       _endDateOverride = null;
@@ -339,7 +337,7 @@ class _CreateBillTabState extends State<_CreateBillTab> {
       }).toList();
 
       final bodyMap = <String, dynamic>{
-        'member_id': _selectedMember!['id'],
+        'member_id': _selectedMember!.id,
         'items': itemsForApi,
         'total': _total,
         'payment_method': _paymentMethod,
@@ -350,10 +348,8 @@ class _CreateBillTabState extends State<_CreateBillTab> {
       if (_displayEndDate != null) bodyMap['end_date'] = formatApiDate(_displayEndDate!);
       final batchVal = _batchController.text.trim();
       if (batchVal.isNotEmpty) bodyMap['batch'] = batchVal;
-      final phone = _selectedMember!['phone']?.toString();
-      if (phone != null && phone.isNotEmpty) bodyMap['member_phone'] = phone;
-      final email = _selectedMember!['email']?.toString();
-      if (email != null && email.isNotEmpty) bodyMap['member_email'] = email;
+      if (_selectedMember!.phone.isNotEmpty) bodyMap['member_phone'] = _selectedMember!.phone;
+      if (_selectedMember!.email.isNotEmpty) bodyMap['member_email'] = _selectedMember!.email;
 
       final body = jsonEncode(bodyMap);
       final r = await ApiClient.instance.post('/billing/create', headers: {'Content-Type': 'application/json'}, body: body);
@@ -380,7 +376,7 @@ class _CreateBillTabState extends State<_CreateBillTab> {
                   child: Column(
                     children: [
                       _infoRow('Bill No', billNo),
-                      _infoRow('Member', _selectedMember!['name'] as String? ?? ''),
+                      _infoRow('Member', _selectedMember!.name),
                       _infoRow('Total', '₹$_total'),
                       _infoRow('Method', _paymentMethod),
                       _infoRow('Date', formatDisplayDate(_paymentDate)),
@@ -392,12 +388,12 @@ class _CreateBillTabState extends State<_CreateBillTab> {
             actions: [
               OutlinedButton.icon(
                 onPressed: () async {
-                  Map<String, dynamic>? gymProfile;
+                  GymProfile? gymProfile;
                   try {
                     final rp = await ApiClient.instance.get('/gym/profile', useCache: true);
-                    if (rp.statusCode >= 200 && rp.statusCode < 300) gymProfile = jsonDecode(rp.body) as Map<String, dynamic>?;
+                    if (rp.statusCode >= 200 && rp.statusCode < 300) gymProfile = ApiClient.parseGymProfile(rp.body);
                   } catch (_) {}
-                  if (ctx.mounted) await PdfInvoiceHelper.generateAndPrint(inv, gymProfile: gymProfile);
+                  if (ctx.mounted) await PdfInvoiceHelper.generateAndPrint(inv, gymProfile: gymProfile?.toJson());
                 },
                 icon: const Icon(Icons.print_rounded, size: 18),
                 label: const Text('Print / PDF'),
@@ -530,10 +526,10 @@ class _CreateBillTabState extends State<_CreateBillTab> {
                               leading: CircleAvatar(
                                 radius: 18,
                                 backgroundColor: AppTheme.primary.withOpacity(0.15),
-                                child: Text((m['name'] as String? ?? '?')[0].toUpperCase(), style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
+                                child: Text((m.name.isNotEmpty ? m.name[0] : '?').toUpperCase(), style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
                               ),
-                              title: Text(m['name'] as String? ?? '', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500)),
-                              subtitle: Text('${m['phone'] ?? ''} · ${m['membership_type'] ?? ''} · ${m['batch'] ?? ''}', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
+                              title: Text(m.name, style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500)),
+                              subtitle: Text('${m.phone} · ${m.membershipType} · ${m.batch}', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
                               onTap: () => _selectMember(m),
                             );
                           },
@@ -598,7 +594,7 @@ class _CreateBillTabState extends State<_CreateBillTab> {
               Row(
                 children: [
                   Expanded(
-                    child: DropdownButtonFormField<Map<String, dynamic>>(
+                    child: DropdownButtonFormField<GymPlan>(
                       value: _addPlan,
                       decoration: InputDecoration(
                         hintText: 'Select plan to add...',
@@ -607,9 +603,9 @@ class _CreateBillTabState extends State<_CreateBillTab> {
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       ),
                       items: _plans.map((p) {
-                        final name = p['name'] as String? ?? '';
-                        final price = int.tryParse(p['price']?.toString() ?? '0') ?? 0;
-                        return DropdownMenuItem(value: p, child: Text('$name — ₹$price', style: GoogleFonts.poppins(fontSize: 13)));
+                        final name = p.name;
+                        final price = p.price;
+                        return DropdownMenuItem<GymPlan>(value: p, child: Text('$name — ₹$price', style: GoogleFonts.poppins(fontSize: 13)));
                       }).toList(),
                       onChanged: (v) => setState(() => _addPlan = v),
                     ),
@@ -832,17 +828,17 @@ class _CreateBillTabState extends State<_CreateBillTab> {
     );
   }
 
-  Widget _memberCard(Map<String, dynamic> m) => Card(
+  Widget _memberCard(Member m) => Card(
     color: AppTheme.primary.withOpacity(0.07),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: AppTheme.primary.withOpacity(0.3))),
     child: ListTile(
       leading: CircleAvatar(
         backgroundColor: AppTheme.primary.withOpacity(0.2),
-        child: Text((m['name'] as String? ?? '?')[0].toUpperCase(), style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
+        child: Text((m.name.isNotEmpty ? m.name[0] : '?').toUpperCase(), style: TextStyle(color: AppTheme.primary, fontWeight: FontWeight.bold)),
       ),
-      title: Text(m['name'] as String? ?? '', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+      title: Text(m.name, style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
       subtitle: Text(
-        '${m['phone'] ?? ''} · ${m['membership_type'] ?? ''} · ${m['batch'] ?? ''}',
+        '${m.phone} · ${m.membershipType} · ${m.batch}',
         style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600),
       ),
       trailing: IconButton(
@@ -871,7 +867,7 @@ class _CreateBillTabState extends State<_CreateBillTab> {
 // ---------------------------------------------------------------------------
 
 class _InvoiceHistoryTab extends StatefulWidget {
-  final List<Map<String, dynamic>> invoices;
+  final List<Invoice> invoices;
   final bool loading;
   final VoidCallback onRefresh;
   final void Function({String? search, String? dateFrom, String? dateTo}) loadInvoices;
@@ -1013,13 +1009,9 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
                         itemCount: widget.invoices.length,
                         itemBuilder: (context, i) {
                           final inv = widget.invoices[i];
-                          final isPaid = inv['status'] == 'Paid';
-                          final issuedAt = inv['issued_at'];
-                          final paidAt = inv['paid_at'];
-                          final paidStr = paidAt != null ? formatDisplayDate(parseApiDateTime(paidAt.toString())) : null;
-                          final billNo = inv['bill_number'] as String? ?? '#${(inv['id'] as String? ?? '').substring(0, 8)}';
-                          final method = inv['payment_method'] as String?;
-                          final notes = inv['notes'] as String?;
+                          final isPaid = inv.status == 'Paid';
+                          final paidStr = inv.paidAt != null ? formatDisplayDate(inv.paidAt) : null;
+                          final billNo = inv.billNumber ?? '#${inv.id.length >= 8 ? inv.id.substring(0, 8) : inv.id}';
                           return Card(
                             margin: const EdgeInsets.only(bottom: 10),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1034,7 +1026,7 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
                                     Row(
                                       children: [
                                         Expanded(
-                                          child: Text(inv['member_name'] as String? ?? '', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15)),
+                                          child: Text(inv.memberName, style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15)),
                                         ),
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -1052,7 +1044,7 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
                                       children: [
                                         Text(billNo, style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
                                         const Spacer(),
-                                        Text('₹${inv['total']}', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.primary)),
+                                        Text('₹${inv.total}', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.primary)),
                                       ],
                                     ),
                                     if (isPaid && paidStr != null) ...[
@@ -1061,16 +1053,16 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
                                         children: [
                                           Icon(Icons.check_circle_rounded, size: 14, color: Colors.green.shade600),
                                           const SizedBox(width: 4),
-                                          Text('Paid on $paidStr${method != null ? ' · $method' : ''}', style: GoogleFonts.poppins(fontSize: 12, color: Colors.green.shade700)),
+                                          Text('Paid on $paidStr${inv.paymentMethod != null ? ' · ${inv.paymentMethod}' : ''}', style: GoogleFonts.poppins(fontSize: 12, color: Colors.green.shade700)),
                                         ],
                                       ),
-                                    ] else if (!isPaid && issuedAt != null) ...[
+                                    ] else if (!isPaid && inv.issuedAt != null) ...[
                                       const SizedBox(height: 4),
-                                      Text('Issued: ${formatDisplayDate(parseApiDateTime(issuedAt.toString()))}', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
+                                      Text('Issued: ${formatDisplayDate(inv.issuedAt)}', style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600)),
                                     ],
-                                    if (notes != null && notes.isNotEmpty) ...[
+                                    if (inv.notes != null && inv.notes!.isNotEmpty) ...[
                                       const SizedBox(height: 4),
-                                      Text(notes, style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade500, fontStyle: FontStyle.italic), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                      Text(inv.notes!, style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade500, fontStyle: FontStyle.italic), maxLines: 1, overflow: TextOverflow.ellipsis),
                                     ],
                                     if (!isPaid) ...[
                                       const SizedBox(height: 10),
@@ -1097,12 +1089,10 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
     );
   }
 
-  static void showInvoiceDialog(BuildContext context, Map<String, dynamic> inv, VoidCallback onRefresh) {
-    final isPaid = inv['status'] == 'Paid';
-    final billNo = inv['bill_number'] as String? ?? '#${(inv['id'] as String? ?? '').substring(0, 8)}';
-    final paidAt = inv['paid_at'];
-    final paidStr = paidAt != null ? formatDisplayDate(parseApiDateTime(paidAt.toString())) : null;
-    final method = inv['payment_method'] as String?;
+  static void showInvoiceDialog(BuildContext context, Invoice inv, VoidCallback onRefresh) {
+    final isPaid = inv.status == 'Paid';
+    final billNo = inv.billNumber ?? '#${inv.id.length >= 8 ? inv.id.substring(0, 8) : inv.id}';
+    final paidStr = inv.paidAt != null ? formatDisplayDate(inv.paidAt) : null;
 
     showDialog(
       context: context,
@@ -1112,7 +1102,7 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(inv['member_name'] as String? ?? '', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 18)),
+            Text(inv.memberName, style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 18)),
             Text(billNo, style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade600)),
           ],
         ),
@@ -1121,13 +1111,13 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              ...(inv['items'] as List<dynamic>? ?? []).map((e) => Padding(
+              ...inv.items.map((e) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Expanded(child: Text(e['description'] as String? ?? '', style: GoogleFonts.poppins(fontSize: 14))),
-                    Text('₹${e['amount']}', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500)),
+                    Expanded(child: Text(e.description, style: GoogleFonts.poppins(fontSize: 14))),
+                    Text('₹${e.amount}', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500)),
                   ],
                 ),
               )),
@@ -1136,7 +1126,7 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text('Total', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 15)),
-                  Text('₹${inv['total']}', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 15, color: AppTheme.primary)),
+                  Text('₹${inv.total}', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 15, color: AppTheme.primary)),
                 ],
               ),
               if (isPaid && paidStr != null) ...[
@@ -1145,13 +1135,13 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
                   children: [
                     Icon(Icons.check_circle_rounded, color: Colors.green.shade600, size: 16),
                     const SizedBox(width: 6),
-                    Text('Paid on $paidStr${method != null ? ' via $method' : ''}', style: GoogleFonts.poppins(fontSize: 13, color: Colors.green.shade700)),
+                    Text('Paid on $paidStr${inv.paymentMethod != null ? ' via ${inv.paymentMethod}' : ''}', style: GoogleFonts.poppins(fontSize: 13, color: Colors.green.shade700)),
                   ],
                 ),
               ],
-              if (inv['end_date'] != null) ...[
+              if (inv.endDate != null) ...[
                 const SizedBox(height: 6),
-                Text('Valid until ${formatDisplayDate(parseApiDateTime(inv['end_date'].toString()))}', style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade600)),
+                Text('Valid until ${formatDisplayDate(inv.endDate)}', style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade600)),
               ],
               if (!isPaid) ...[
                 const SizedBox(height: 16),
@@ -1164,12 +1154,12 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
         actions: [
           OutlinedButton.icon(
             onPressed: () async {
-              Map<String, dynamic>? gymProfile;
+              GymProfile? gymProfile;
               try {
                 final r = await ApiClient.instance.get('/gym/profile', useCache: true);
-                if (r.statusCode >= 200 && r.statusCode < 300) gymProfile = jsonDecode(r.body) as Map<String, dynamic>?;
+                if (r.statusCode >= 200 && r.statusCode < 300) gymProfile = ApiClient.parseGymProfile(r.body);
               } catch (_) {}
-              if (ctx.mounted) await PdfInvoiceHelper.generateAndPrint(inv, gymProfile: gymProfile);
+              if (ctx.mounted) await PdfInvoiceHelper.generateAndPrint(inv.toJson(), gymProfile: gymProfile?.toJson());
             },
             icon: const Icon(Icons.print_rounded, size: 18),
             label: const Text('Print / PDF'),
@@ -1200,7 +1190,7 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
                 ),
               );
               if (confirm != true || !ctx.mounted) return;
-              final r = await ApiClient.instance.delete('/billing/invoices/${inv['id']}');
+              final r = await ApiClient.instance.delete('/billing/invoices/${inv.id}');
               if (ctx.mounted) {
                 Navigator.pop(ctx);
                 onRefresh();
@@ -1220,7 +1210,7 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
             FilledButton(
               onPressed: () async {
                 Navigator.pop(ctx);
-                final r = await ApiClient.instance.post('/billing/pay?invoice_id=${inv['id']}');
+                final r = await ApiClient.instance.post('/billing/pay?invoice_id=${inv.id}');
                 if (r.statusCode >= 200 && r.statusCode < 300) {
                   ApiClient.instance.invalidateCache();
                   onRefresh();
@@ -1235,18 +1225,14 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
     );
   }
 
-  static Future<void> showEditInvoiceDialog(BuildContext context, Map<String, dynamic> inv, VoidCallback onRefresh) async {
-    final rawItems = inv['items'] as List<dynamic>? ?? [];
-    List<Map<String, dynamic>> items = rawItems.map((e) => {
-      'description': (e as Map<String, dynamic>)['description']?.toString() ?? '',
-      'amount': (e as Map<String, dynamic>)['amount'] is int ? (e as Map<String, dynamic>)['amount'] as int : int.tryParse((e as Map<String, dynamic>)['amount']?.toString() ?? '0') ?? 0,
-    }).toList();
+  static Future<void> showEditInvoiceDialog(BuildContext context, Invoice inv, VoidCallback onRefresh) async {
+    List<Map<String, dynamic>> items = inv.items.map((e) => {'description': e.description, 'amount': e.amount}).toList();
     if (items.isEmpty) items = [{'description': '', 'amount': 0}];
-    DateTime paymentDate = inv['paid_at'] != null ? parseApiDateTime(inv['paid_at'].toString()) ?? DateTime.now() : (inv['issued_at'] != null ? parseApiDateTime(inv['issued_at'].toString()) ?? DateTime.now() : DateTime.now());
+    DateTime paymentDate = inv.paidAt ?? inv.issuedAt ?? DateTime.now();
     if (paymentDate.isUtc) paymentDate = paymentDate.toLocal();
-    DateTime? endDate = inv['end_date'] != null ? parseApiDateTime(inv['end_date'].toString()) : null;
+    DateTime? endDate = inv.endDate;
     if (endDate != null && endDate.isUtc) endDate = endDate.toLocal();
-    final notesController = TextEditingController(text: inv['notes']?.toString() ?? '');
+    final notesController = TextEditingController(text: inv.notes ?? '');
 
     await showDialog(
       context: context,
@@ -1367,7 +1353,7 @@ class _InvoiceHistoryTabState extends State<_InvoiceHistoryTab> {
                   };
                   if (endDate != null) body['end_date'] = formatApiDate(endDate!);
                   final r = await ApiClient.instance.patch(
-                    '/billing/invoices/${inv['id']}',
+                    '/billing/invoices/${inv.id}',
                     headers: {'Content-Type': 'application/json'},
                     body: jsonEncode(body),
                   );

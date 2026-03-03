@@ -7,7 +7,6 @@
 // ---------------------------------------------------------------------------
 
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -22,9 +21,9 @@ import '../core/api_client.dart';
 import '../core/date_utils.dart';
 import '../core/image_compression.dart';
 import '../core/pdf_invoice_helper.dart';
+import '../models/models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/attendance_stats_card.dart';
-import 'dashboard_screen.dart';
 import 'login_screen.dart';
 
 /// Shows edit member dialog; returns updated [Member] on save, null on cancel.
@@ -301,8 +300,8 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
   late TabController _tabController;
   late Member _member;
   Map<String, dynamic>? _attendanceStats;
-  List<dynamic> _payments = []; // Paid invoices for this member (from billing/history, status=Paid)
-  List<dynamic> _attendanceList = [];
+  List<Invoice> _payments = []; // Paid invoices for this member (from billing/history, status=Paid)
+  List<AttendanceRecord> _attendanceList = [];
   bool _loadingPayments = true;
   bool _loadingAttendance = true;
 
@@ -324,8 +323,7 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
     try {
       final r = await ApiClient.instance.get('/members/${_member.id}', useCache: false);
       if (mounted && r.statusCode == 200) {
-        final map = jsonDecode(r.body) as Map<String, dynamic>?;
-        if (map != null) setState(() => _member = Member.fromJson(map));
+        setState(() => _member = ApiClient.parseMember(r.body));
       }
     } catch (_) {}
   }
@@ -343,9 +341,6 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
     if (result == null || result.files.isEmpty) return null;
     final file = result.files.single;
     List<int>? bytes = file.bytes;
-    if (bytes == null && file.path != null) {
-      try { bytes = await File(file.path!).readAsBytes(); } catch (_) {}
-    }
     if (bytes == null) return null;
     final bytesList = Uint8List.fromList(bytes);
     // Compress image ID documents (not PDF) to keep under 500 KB
@@ -421,9 +416,9 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
     try {
       final r = await ApiClient.instance.get('/billing/history', queryParameters: {'member_id': _member.id}, useCache: false);
       if (mounted && r.statusCode == 200) {
-        final list = jsonDecode(r.body) as List<dynamic>? ?? [];
+        final list = ApiClient.parseInvoices(r.body);
         setState(() {
-          _payments = list.where((e) => (e as Map<String, dynamic>)['status'] == 'Paid').toList();
+          _payments = list.where((e) => e.status == 'Paid').toList();
           _loadingPayments = false;
         });
       } else if (mounted) setState(() => _loadingPayments = false);
@@ -439,9 +434,9 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
       final from = now.subtract(const Duration(days: 90));
       final r = await ApiClient.instance.get('/attendance/by-date-range', queryParameters: {'date_from': formatApiDate(from), 'date_to': formatApiDate(now)}, useCache: false);
       if (mounted && r.statusCode == 200) {
-        final all = jsonDecode(r.body) as List<dynamic>;
+        final all = ApiClient.parseAttendanceRecords(r.body);
         setState(() {
-          _attendanceList = all.where((e) => (e as Map<String, dynamic>)['member_id'] == _member.id).toList();
+          _attendanceList = all.where((e) => e.memberId == _member.id).toList();
           _loadingAttendance = false;
         });
       } else if (mounted) setState(() => _loadingAttendance = false);
@@ -969,7 +964,7 @@ class _OverviewTab extends StatelessWidget {
                   _contactRow(Icons.phone_android_outlined, 'Phone', member.phone),
                   _contactRow(Icons.location_on_outlined, 'Address', member.address ?? '—'),
                   _contactRow(Icons.person_outline, 'Gender', member.gender ?? '—'),
-                  _contactRow(Icons.cake_outlined, 'Date of Birth', member.dateOfBirth != null && member.dateOfBirth!.isNotEmpty ? (formatDisplayDate(parseApiDate(member.dateOfBirth)) ?? member.dateOfBirth!) : '—'),
+                  _contactRow(Icons.cake_outlined, 'Date of Birth', member.dateOfBirth != null && member.dateOfBirth!.isNotEmpty ? formatDisplayDate(parseApiDate(member.dateOfBirth)) : '—'),
                 ],
               ),
             ),
@@ -1004,7 +999,7 @@ class _OverviewTab extends StatelessWidget {
 }
 
 class _PaymentsTab extends StatelessWidget {
-  final List<dynamic> payments; // Paid invoices only
+  final List<Invoice> payments; // Paid invoices only
   final bool loading;
   final VoidCallback onRefresh;
 
@@ -1045,16 +1040,9 @@ class _PaymentsTab extends StatelessWidget {
               style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.onSurface),
             ),
           ),
-          ...payments.map<Widget>((e) {
-            final inv = e as Map<String, dynamic>;
-            final paidAt = inv['paid_at'];
-            final paidDateStr = paidAt != null ? formatDisplayDate(parseApiDateTime(paidAt.toString())) : '—';
-            final billNo = inv['bill_number'] as String? ?? '#${(inv['id'] as String? ?? '').substring(0, 8)}';
-            final total = (inv['total'] as num?)?.toInt() ?? 0;
-            final rawItems = inv['items'];
-            final items = rawItems is List
-                ? List<dynamic>.from(rawItems)
-                : (rawItems is Map ? [rawItems] : <dynamic>[]);
+          ...payments.map<Widget>((inv) {
+            final paidDateStr = inv.paidAt != null ? formatDisplayDate(inv.paidAt) : '—';
+            final billNo = inv.billNumber ?? '#${inv.id.length >= 8 ? inv.id.substring(0, 8) : inv.id}';
             return Card(
               margin: const EdgeInsets.only(bottom: 12),
               child: Padding(
@@ -1070,17 +1058,14 @@ class _PaymentsTab extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 10),
-                    ...items.map<Widget>((it) {
-                      final item = it as Map<String, dynamic>? ?? {};
-                      final desc = item['description']?.toString() ?? '';
-                      final amt = (item['amount'] as num?)?.toInt() ?? 0;
+                    ...inv.items.map<Widget>((item) {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 4),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Expanded(child: Text(desc, style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade700))),
-                            Text('₹$amt', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500)),
+                            Expanded(child: Text(item.description, style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade700))),
+                            Text('₹${item.amount}', style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w500)),
                           ],
                         ),
                       );
@@ -1090,18 +1075,18 @@ class _PaymentsTab extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text('Total', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600)),
-                        Text('₹$total', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.primary)),
+                        Text('₹${inv.total}', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: AppTheme.primary)),
                       ],
                     ),
                     const SizedBox(height: 12),
                     OutlinedButton.icon(
                       onPressed: () async {
-                        Map<String, dynamic>? gymProfile;
+                        GymProfile? gymProfile;
                         try {
                           final r = await ApiClient.instance.get('/gym/profile', useCache: true);
-                          if (r.statusCode >= 200 && r.statusCode < 300) gymProfile = jsonDecode(r.body) as Map<String, dynamic>?;
+                          if (r.statusCode >= 200 && r.statusCode < 300) gymProfile = ApiClient.parseGymProfile(r.body);
                         } catch (_) {}
-                        if (context.mounted) await PdfInvoiceHelper.generateAndPrint(inv, gymProfile: gymProfile);
+                        if (context.mounted) await PdfInvoiceHelper.generateAndPrint(inv.toJson(), gymProfile: gymProfile?.toJson());
                       },
                       icon: const Icon(Icons.print_rounded, size: 18),
                       label: const Text('Print invoice PDF'),
@@ -1119,7 +1104,7 @@ class _PaymentsTab extends StatelessWidget {
 
 class _AttendanceTab extends StatelessWidget {
   final Map<String, dynamic>? stats;
-  final List<dynamic> attendanceList;
+  final List<AttendanceRecord> attendanceList;
   final bool loading;
   final String lastVisit;
   final Future<void> Function() onRefresh;
@@ -1162,17 +1147,14 @@ class _AttendanceTab extends StatelessWidget {
               child: Center(child: Text('No attendance records', style: GoogleFonts.poppins(color: Colors.grey))),
             )
           else
-            ...attendanceList.map<Widget>((e) {
-              final a = e as Map<String, dynamic>;
-              final checkInDt = parseApiDateTime(a['check_in_at']?.toString());
-              final checkOutDt = parseApiDateTime(a['check_out_at']?.toString());
-              final inStr = formatDisplayTime(checkInDt);
-              final outStr = checkOutDt != null ? formatDisplayTime(checkOutDt) : '—';
+            ...attendanceList.map<Widget>((a) {
+              final inStr = formatDisplayTime(a.checkInAt);
+              final outStr = a.checkOutAt != null ? formatDisplayTime(a.checkOutAt) : '—';
               return Card(
                 margin: const EdgeInsets.only(bottom: 8),
                 child: ListTile(
-                  title: Text(a['date_ist'] ?? '', style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
-                  subtitle: Text('${a['batch']} • In: $inStr • Out: $outStr'),
+                  title: Text(a.dateIst, style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
+                  subtitle: Text('${a.batch} • In: $inStr • Out: $outStr'),
                 ),
               );
             }),

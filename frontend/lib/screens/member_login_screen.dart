@@ -5,8 +5,6 @@
 // for subsequent API calls (attendance, payments, etc.).
 // ---------------------------------------------------------------------------
 
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -65,7 +63,7 @@ class _MemberLoginScreenState extends State<MemberLoginScreen> {
       final r = await ApiClient.instance.get('/members/by-phone/${Uri.encodeComponent(phone)}', useCache: false);
       if (!mounted) return;
       if (r.statusCode >= 200 && r.statusCode < 300) {
-        final member = jsonDecode(r.body) as Map<String, dynamic>;
+        final member = ApiClient.parseMember(r.body);
         setState(() => _loading = false);
         if (!mounted) return;
         Navigator.pushReplacement(
