@@ -276,9 +276,12 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     return Scaffold(
       backgroundColor: AppTheme.surface,
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded),
-          onPressed: () => Navigator.of(context).pop(),
+        leading: Tooltip(
+          message: 'Back',
+          child: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
         ),
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -502,8 +505,10 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
               ),
             ),
             const SizedBox(height: 32),
-            FilledButton.icon(
-              onPressed: _isSubmitting ? null : _submit,
+            Tooltip(
+              message: 'Register new member',
+              child: FilledButton.icon(
+                onPressed: _isSubmitting ? null : _submit,
               icon: _isSubmitting
                   ? const SizedBox(
                       width: 20,
@@ -519,6 +524,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 elevation: 0,
               ),
+            ),
             ),
             const SizedBox(height: 32),
           ],

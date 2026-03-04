@@ -538,6 +538,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh member list',
             onPressed: _loading ? null : () => _loadMembers(append: false),
           ),
           PopupMenuButton<String>(
@@ -575,11 +576,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         const SizedBox(height: 16),
                         Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
                         const SizedBox(height: 24),
-                        FilledButton.icon(
-                          onPressed: () => _loadMembers(append: false),
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Retry'),
-                          style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: AppTheme.onPrimary),
+                        Tooltip(
+                          message: 'Retry loading members',
+                          child: FilledButton.icon(
+                            onPressed: () => _loadMembers(append: false),
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Retry'),
+                            style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: AppTheme.onPrimary),
+                          ),
                         ),
                       ],
                     ),
@@ -624,10 +628,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 16),
                               child: Center(
-                                child: TextButton.icon(
-                                  onPressed: () => _loadMembers(append: true),
-                                  icon: const Icon(Icons.add_circle_outline, size: 20),
-                                  label: const Text('Load more'),
+                                child: Tooltip(
+                                  message: 'Load more members',
+                                  child: TextButton.icon(
+                                    onPressed: () => _loadMembers(append: true),
+                                    icon: const Icon(Icons.add_circle_outline, size: 20),
+                                    label: const Text('Load more'),
+                                  ),
                                 ),
                               ),
                             );
@@ -719,16 +726,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.end,
                                     children: [
-                                      TextButton(
-                                        onPressed: () => _showMemberEditDialog(context, m),
-                                        style: TextButton.styleFrom(minimumSize: Size.zero, padding: const EdgeInsets.symmetric(horizontal: 12), foregroundColor: AppTheme.onSurface),
-                                        child: const Text('Edit'),
+                                      Tooltip(
+                                        message: 'Edit member details',
+                                        child: TextButton(
+                                          onPressed: () => _showMemberEditDialog(context, m),
+                                          style: TextButton.styleFrom(minimumSize: Size.zero, padding: const EdgeInsets.symmetric(horizontal: 12), foregroundColor: AppTheme.onSurface),
+                                          child: const Text('Edit'),
+                                        ),
                                       ),
                                       if (m.membershipType.toLowerCase() == 'pt')
-                                        TextButton(
-                                          onPressed: () => _showPTEditSheet(context, m),
-                                          style: TextButton.styleFrom(minimumSize: Size.zero, padding: const EdgeInsets.symmetric(horizontal: 8), foregroundColor: AppTheme.primary),
-                                          child: const Text('PT'),
+                                        Tooltip(
+                                          message: 'Edit workout schedule and diet chart',
+                                          child: TextButton(
+                                            onPressed: () => _showPTEditSheet(context, m),
+                                            style: TextButton.styleFrom(minimumSize: Size.zero, padding: const EdgeInsets.symmetric(horizontal: 8), foregroundColor: AppTheme.primary),
+                                            child: const Text('PT'),
+                                          ),
                                         ),
                                       if (m.isCheckedOutToday == true)
                                         Container(
@@ -768,33 +781,39 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                               ),
                                             ),
                                             const SizedBox(width: 8),
-                                            OutlinedButton(
-                                              onPressed: (isCheckingOut || !isActive) ? null : () => _checkOut(m),
-                                              style: OutlinedButton.styleFrom(
-                                                foregroundColor: AppTheme.primary,
-                                                side: const BorderSide(color: AppTheme.primary),
-                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                                                minimumSize: Size.zero,
+                                            Tooltip(
+                                              message: 'Record check-out for this member',
+                                              child: OutlinedButton(
+                                                onPressed: (isCheckingOut || !isActive) ? null : () => _checkOut(m),
+                                                style: OutlinedButton.styleFrom(
+                                                  foregroundColor: AppTheme.primary,
+                                                  side: const BorderSide(color: AppTheme.primary),
+                                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                                  minimumSize: Size.zero,
+                                                ),
+                                                child: isCheckingOut
+                                                    ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary))
+                                                    : const Text('Check-Out'),
                                               ),
-                                              child: isCheckingOut
-                                                  ? SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primary))
-                                                  : const Text('Check-Out'),
                                             ),
                                           ],
                                         )
                                       else
-                                        FilledButton.icon(
-                                          onPressed: (isCheckingIn || !isActive) ? null : () => _checkIn(m),
-                                          style: FilledButton.styleFrom(
-                                            backgroundColor: AppTheme.primary,
-                                            foregroundColor: AppTheme.onPrimary,
-                                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                            minimumSize: Size.zero,
+                                        Tooltip(
+                                          message: 'Record check-in for this member',
+                                          child: FilledButton.icon(
+                                            onPressed: (isCheckingIn || !isActive) ? null : () => _checkIn(m),
+                                            style: FilledButton.styleFrom(
+                                              backgroundColor: AppTheme.primary,
+                                              foregroundColor: AppTheme.onPrimary,
+                                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                              minimumSize: Size.zero,
+                                            ),
+                                            icon: isCheckingIn
+                                                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.onPrimary))
+                                                : const Icon(Icons.login, size: 18),
+                                            label: const Text('Check-In'),
                                           ),
-                                          icon: isCheckingIn
-                                              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.onPrimary))
-                                              : const Icon(Icons.login, size: 18),
-                                          label: const Text('Check-In'),
                                         ),
                                     ],
                                   ),

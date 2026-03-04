@@ -27,6 +27,8 @@ import 'gym_settings_screen.dart';
 import 'member_detail_screen.dart';
 import 'registration_screen.dart';
 import 'broadcast_messages_screen.dart';
+import 'expense_management_screen.dart';
+import 'retention_alerts_screen.dart';
 
 /// Breakpoint below which overview cards stack vertically (avoid overflow on phones).
 const double _overviewNarrowBreakpoint = 420;
@@ -168,10 +170,24 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ),
           IconButton(
             icon: const Icon(FontAwesomeIcons.calendarDays),
+            tooltip: 'Attendance report',
             onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AttendanceReportScreen())),
           ),
           IconButton(
+            icon: const Icon(Icons.account_balance_wallet),
+            tooltip: 'P&L / Expenses',
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ExpenseManagementScreen())),
+          ),
+          Tooltip(
+            message: 'Retention Alerts',
+            child: IconButton(
+              icon: const Icon(Icons.warning_amber_rounded),
+              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RetentionAlertsScreen())),
+            ),
+          ),
+          IconButton(
             icon: const Icon(FontAwesomeIcons.fileExport),
+            tooltip: 'Export data (members, payments, billing)',
             onPressed: _showExportMenu,
           ),
           IconButton(
@@ -628,12 +644,15 @@ class _OverviewTabState extends State<_OverviewTab> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                OutlinedButton.icon(
-                  onPressed: _pickDateRange,
-                  icon: const Icon(Icons.date_range, size: 18),
-                  label: Text(_dateFrom != null && _dateTo != null
-                      ? '${_dateFrom!.day}/${_dateFrom!.month} - ${_dateTo!.day}/${_dateTo!.month}'
-                      : 'Past period'),
+                Tooltip(
+                  message: 'Select date range for period stats',
+                  child: OutlinedButton.icon(
+                    onPressed: _pickDateRange,
+                    icon: const Icon(Icons.date_range, size: 18),
+                    label: Text(_dateFrom != null && _dateTo != null
+                        ? '${_dateFrom!.day}/${_dateFrom!.month} - ${_dateTo!.day}/${_dateTo!.month}'
+                        : 'Past period'),
+                  ),
                 ),
                 if (_dateFrom != null && _dateTo != null)
                   IconButton(
@@ -721,11 +740,14 @@ class _OverviewTabState extends State<_OverviewTab> {
               ],
             ),
             const SizedBox(height: 24),
-            FilledButton.icon(
-              onPressed: _sendingReminders ? null : _sendReminders,
-              icon: _sendingReminders ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(FontAwesomeIcons.whatsapp),
-              label: Text(_sendingReminders ? 'Sending...' : 'Send Payment Reminders'),
-              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: AppTheme.onPrimary),
+            Tooltip(
+              message: 'Send WhatsApp payment reminders to members with due or overdue fees',
+              child: FilledButton.icon(
+                onPressed: _sendingReminders ? null : _sendReminders,
+                icon: _sendingReminders ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(FontAwesomeIcons.whatsapp),
+                label: Text(_sendingReminders ? 'Sending...' : 'Send Payment Reminders'),
+                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: AppTheme.onPrimary),
+              ),
             ),
           ],
         ),
@@ -842,11 +864,14 @@ class _MembersTabState extends State<_MembersTab> {
                 onChanged: (_) => setState(() {}),
               ),
               const SizedBox(height: 8),
-              FilledButton.icon(
-                onPressed: widget.onRegisterPressed,
-                icon: const Icon(FontAwesomeIcons.userPlus, size: 18),
-                label: const Text('Register'),
-                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: AppTheme.onPrimary),
+              Tooltip(
+                message: 'Register a new member',
+                child: FilledButton.icon(
+                  onPressed: widget.onRegisterPressed,
+                  icon: const Icon(FontAwesomeIcons.userPlus, size: 18),
+                  label: const Text('Register'),
+                  style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: AppTheme.onPrimary),
+                ),
               ),
               if (widget.onImportPressed != null) ...[
                 const SizedBox(height: 8),
@@ -878,11 +903,14 @@ class _MembersTabState extends State<_MembersTab> {
                 ),
               ),
               const SizedBox(width: 8),
-              FilledButton.icon(
-                onPressed: widget.onRegisterPressed,
-                icon: const Icon(FontAwesomeIcons.userPlus, size: 18),
-                label: const Text('Register'),
-                style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: AppTheme.onPrimary),
+              Tooltip(
+                message: 'Register a new member',
+                child: FilledButton.icon(
+                  onPressed: widget.onRegisterPressed,
+                  icon: const Icon(FontAwesomeIcons.userPlus, size: 18),
+                  label: const Text('Register'),
+                  style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: AppTheme.onPrimary),
+                ),
               ),
               if (widget.onImportPressed != null) ...[
                 const SizedBox(width: 8),

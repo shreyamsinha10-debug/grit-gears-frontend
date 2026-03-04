@@ -260,6 +260,82 @@ class ApiClient {
     }
   }
 
+  /// GET /expenses?month=YYYY-MM. Returns list of expenses for the month.
+  Future<List<Expense>> getExpenses(String month) async {
+    final r = await get('/expenses', queryParameters: {'month': month}, useCache: false);
+    if (r.statusCode >= 200 && r.statusCode < 300) return ApiClient.parseExpenses(r.body);
+    return [];
+  }
+
+  /// GET /expenses/balance-sheet?month=YYYY-MM. Returns balance sheet summary or null on error.
+  Future<BalanceSheetSummary?> getBalanceSheet(String month) async {
+    final r = await get('/expenses/balance-sheet', queryParameters: {'month': month}, useCache: false);
+    if (r.statusCode >= 200 && r.statusCode < 300) return ApiClient.parseBalanceSheet(r.body);
+    return null;
+  }
+
+  /// POST /expenses. Returns created Expense on success, null on error.
+  Future<Expense?> addExpense(Map<String, dynamic> body) async {
+    final r = await post(
+      '/expenses',
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+      encoding: utf8,
+    );
+    if (r.statusCode >= 200 && r.statusCode < 300) return ApiClient.parseExpense(r.body);
+    return null;
+  }
+
+  /// PATCH /expenses/{id}. Returns updated Expense on success, null on error.
+  Future<Expense?> updateExpense(String id, Map<String, dynamic> body) async {
+    final r = await patch(
+      '/expenses/$id',
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+      encoding: utf8,
+    );
+    if (r.statusCode >= 200 && r.statusCode < 300) return ApiClient.parseExpense(r.body);
+    return null;
+  }
+
+  /// GET /analytics/retention-alerts. Returns list of at-risk members (7+ days since last visit).
+  Future<List<RetentionAlert>> getRetentionAlerts() async {
+    final r = await get('/analytics/retention-alerts', useCache: false);
+    if (r.statusCode >= 200 && r.statusCode < 300) return RetentionAlert.fromJsonList(jsonDecode(r.body));
+    return [];
+  }
+
+  /// GET /members/{id}. Returns full member or null.
+  Future<Member?> getMember(String memberId) async {
+    final r = await get('/members/$memberId', useCache: false);
+    if (r.statusCode >= 200 && r.statusCode < 300) return ApiClient.parseMember(r.body);
+    return null;
+  }
+
+  /// POST /messages. Send a message to members or all_active. Returns true on success.
+  Future<bool> sendMessage({
+    required String title,
+    required String body,
+    required String recipientType,
+    List<String>? recipientMemberIds,
+  }) async {
+    final payload = <String, dynamic>{
+      'title': title,
+      'body': body,
+      'recipient_type': recipientType,
+    };
+    if (recipientType == 'members' && recipientMemberIds != null && recipientMemberIds.isNotEmpty) {
+      payload['recipient_member_ids'] = recipientMemberIds;
+    }
+    final r = await post(
+      '/messages',
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(payload),
+      encoding: utf8,
+    );
+    return r.statusCode >= 200 && r.statusCode < 300;
+  }
+
   void _clearCache() {
     if (_getCache.isNotEmpty) _getCache.clear();
   }
@@ -297,6 +373,18 @@ class ApiClient {
 
   static List<AttendanceRecord> parseAttendanceRecords(String body) {
     return AttendanceRecord.fromJsonList(jsonDecode(body));
+  }
+
+  static Expense parseExpense(String body) {
+    return Expense.fromJson(jsonDecode(body) as Map<String, dynamic>);
+  }
+
+  static List<Expense> parseExpenses(String body) {
+    return Expense.fromJsonList(jsonDecode(body));
+  }
+
+  static BalanceSheetSummary parseBalanceSheet(String body) {
+    return BalanceSheetSummary.fromJson(jsonDecode(body) as Map<String, dynamic>);
   }
 }
 

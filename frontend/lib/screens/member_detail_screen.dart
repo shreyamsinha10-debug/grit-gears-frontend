@@ -579,17 +579,23 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
     final padding = LayoutConstants.screenPadding(context);
     return Scaffold(
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded),
-          onPressed: () => Navigator.pop(context),
+        leading: Tooltip(
+          message: 'Back to dashboard',
+          child: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded),
+            onPressed: () => Navigator.pop(context),
+          ),
         ),
         title: Text('Member Details', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
         actions: [
-          TextButton.icon(
-            onPressed: m.status.toLowerCase() == 'active' ? _cancelMembership : null,
-            icon: const Icon(Icons.cancel_outlined, size: 18),
-            label: const Text('Cancel'),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+          Tooltip(
+            message: 'Cancel this member\'s active membership',
+            child: TextButton.icon(
+              onPressed: m.status.toLowerCase() == 'active' ? _cancelMembership : null,
+              icon: const Icon(Icons.cancel_outlined, size: 18),
+              label: const Text('Cancel'),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+            ),
           ),
           IconButton(
             icon: const Icon(Icons.edit_outlined),
@@ -686,14 +692,17 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
                   ),
                 ],
               ),
-              child: FilledButton.icon(
-                onPressed: _showResetPasswordDialog,
-                icon: const Icon(Icons.lock_reset, size: 20),
-                label: const Text('Reset / Assign Password'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  foregroundColor: AppTheme.onPrimary,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+              child: Tooltip(
+                message: 'Reset or assign login password for this member',
+                child: FilledButton.icon(
+                  onPressed: _showResetPasswordDialog,
+                  icon: const Icon(Icons.lock_reset, size: 20),
+                  label: const Text('Reset / Assign Password'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: AppTheme.onPrimary,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
                 ),
               ),
             ),

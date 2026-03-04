@@ -263,7 +263,11 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
       appBar: AppBar(
         title: const Text('Attendance Records'),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loading ? null : () { _load(); _loadSummary(); }),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh attendance data',
+            onPressed: _loading ? null : () { _load(); _loadSummary(); },
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             tooltip: 'Logout',
@@ -312,6 +316,7 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
                 children: [
                   IconButton(
                     icon: const Icon(Icons.chevron_left),
+                    tooltip: 'Previous day',
                     onPressed: _loading ? null : () {
                       setState(() {
                         if (_useRange) {
@@ -339,6 +344,7 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
                   ),
                   IconButton(
                     icon: const Icon(Icons.chevron_right),
+                    tooltip: 'Next day',
                     onPressed: _loading ? null : () {
                       final now = DateTime.now();
                       setState(() {
@@ -484,10 +490,13 @@ class _AttendanceReportScreenState extends State<AttendanceReportScreen> {
                               DataCell(Text(e.checkOutAt != null ? formatDisplayTime(e.checkOutAt!) : '—')),
                               DataCell(Text(e.durationMinutes)),
                               DataCell(Text(e.batch)),
-                              DataCell(IconButton(
-                                icon: const Icon(Icons.delete_outline, size: 20),
-                                onPressed: () => _deleteAttendance(e),
-                                color: Colors.red,
+                              DataCell(Tooltip(
+                                message: 'Remove this attendance record',
+                                child: IconButton(
+                                  icon: const Icon(Icons.delete_outline, size: 20),
+                                  onPressed: () => _deleteAttendance(e),
+                                  color: Colors.red,
+                                ),
                               )),
                             ],
                           )).toList(),

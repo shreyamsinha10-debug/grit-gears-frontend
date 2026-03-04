@@ -13,6 +13,7 @@ from app.core.config import (
     COLLECTION_ATTENDANCE,
     COLLECTION_PAYMENTS,
     COLLECTION_INVOICES,
+    COLLECTION_EXPENSES,
 )
 
 
@@ -26,6 +27,7 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     payments = db[COLLECTION_PAYMENTS]
     invoices = db[COLLECTION_INVOICES]
     member_documents = db["member_documents"]
+    expenses = db[COLLECTION_EXPENSES]
 
     # Members: filter by gym_id + status, and login by phone + gym_id
     await members.create_index([("gym_id", 1), ("status", 1)], name="members_gym_status")
@@ -61,6 +63,12 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         [("member_id", 1), ("gym_id", 1)],
         name="member_documents_member_gym",
         unique=True,
+    )
+
+    # Expenses: list by gym_id and expense_date (for balance-sheet and list by month)
+    await expenses.create_index(
+        [("gym_id", 1), ("expense_date", -1)],
+        name="expenses_gym_date",
     )
 
 

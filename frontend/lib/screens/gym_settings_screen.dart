@@ -1185,9 +1185,12 @@ class _GymSettingsScreenState extends State<GymSettingsScreen> {
             tooltip: 'Logout',
             onPressed: () => LoginScreen.logout(context),
           ),
-          TextButton(
-            onPressed: _saving ? null : _save,
-            child: _saving ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Save'),
+          Tooltip(
+            message: 'Save all gym settings',
+            child: TextButton(
+              onPressed: _saving ? null : _save,
+              child: _saving ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Save'),
+            ),
           ),
         ],
       ),

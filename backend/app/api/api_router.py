@@ -7,7 +7,7 @@ Auth routes are under prefix /auth (so /auth/login, /auth/owner-claim, /auth/for
 
 from fastapi import APIRouter
 
-from .routers import admin, attendance, auth, billing, documents, export, members, messages, payments
+from .routers import admin, attendance, auth, billing, documents, export, expenses, members, messages, payments, retention
 
 api_router = APIRouter()
 
@@ -18,6 +18,8 @@ api_router.include_router(documents.router, tags=["documents"])
 api_router.include_router(attendance.router, tags=["attendance"])
 api_router.include_router(payments.router, tags=["payments"])
 api_router.include_router(billing.router, tags=["billing"])
+api_router.include_router(expenses.router, prefix="/expenses", tags=["Expenses"])
+api_router.include_router(retention.router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(messages.router, tags=["messages"])
 api_router.include_router(export.router, tags=["export"])
 

@@ -803,23 +803,26 @@ class _CreateBillTabState extends State<_CreateBillTab> {
           const SizedBox(height: 24),
 
           // ── Submit ────────────────────────────────────────────────────
-          FilledButton.icon(
-            onPressed: (_submitting || _selectedMember == null || _items.isEmpty) ? null : _submitBill,
-            icon: _submitting
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Icon(Icons.receipt_long_rounded),
-            label: Text(
-              _submitting
-                  ? 'Creating Bill...'
-                  : _total > 0
-                      ? 'Complete Bill — ₹$_total'
-                      : 'Complete Bill',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15),
-            ),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          Tooltip(
+            message: 'Create and save the bill for the selected member',
+            child: FilledButton.icon(
+              onPressed: (_submitting || _selectedMember == null || _items.isEmpty) ? null : _submitBill,
+              icon: _submitting
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.receipt_long_rounded),
+              label: Text(
+                _submitting
+                    ? 'Creating Bill...'
+                    : _total > 0
+                        ? 'Complete Bill — ₹$_total'
+                        : 'Complete Bill',
+                style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15),
+              ),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
             ),
           ),
           const SizedBox(height: 32),

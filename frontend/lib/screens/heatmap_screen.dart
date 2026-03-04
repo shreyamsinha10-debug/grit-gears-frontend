@@ -87,7 +87,13 @@ class _HeatmapScreenState extends State<HeatmapScreen> {
       backgroundColor: Theme.of(context).colorScheme.surface,
       appBar: AppBar(
         title: Text('Occupancy heatmap', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-        leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new_rounded), onPressed: () => Navigator.of(context).pop()),
+        leading: Tooltip(
+          message: 'Back to dashboard',
+          child: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),

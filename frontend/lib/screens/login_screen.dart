@@ -341,12 +341,15 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 8),
               Align(
                 alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
-                  label: const Text('Back'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.grey.shade600,
+                child: Tooltip(
+                  message: 'Go back',
+                  child: TextButton.icon(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
+                    label: const Text('Back'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.grey.shade600,
+                    ),
                   ),
                 ),
               ),
@@ -493,13 +496,16 @@ class _LoginScreenState extends State<LoginScreen> {
                 decoration: InputDecoration(
                   hintText: '••••••••',
                   prefixIcon: const Icon(Icons.lock_outline, size: 22),
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                      size: 22,
-                      color: Colors.grey.shade600,
+                  suffixIcon: Tooltip(
+                    message: _obscurePassword ? 'Show password' : 'Hide password',
+                    child: IconButton(
+                      icon: Icon(
+                        _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                        size: 22,
+                        color: Colors.grey.shade600,
+                      ),
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                     ),
-                    onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                   ),
                   filled: true,
                   fillColor: surface,
@@ -518,14 +524,17 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 12),
               Align(
                 alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => _showForgotPasswordDialog(context, padding, radius, onSurface, surface, outline),
-                  child: Text(
-                    'Forgot password?',
-                    style: GoogleFonts.poppins(
-                      fontSize: 14,
-                      color: AppTheme.primary,
-                      fontWeight: FontWeight.w500,
+                child: Tooltip(
+                  message: 'Request password reset link',
+                  child: TextButton(
+                    onPressed: () => _showForgotPasswordDialog(context, padding, radius, onSurface, surface, outline),
+                    child: Text(
+                      'Forgot password?',
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        color: AppTheme.primary,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ),
@@ -556,17 +565,19 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 12),
               ],
               const SizedBox(height: 8),
-              FilledButton(
-                onPressed: _loading ? null : _signIn,
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  foregroundColor: AppTheme.onPrimary,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(radius),
+              Tooltip(
+                message: 'Sign in with email or phone and password',
+                child: FilledButton(
+                  onPressed: _loading ? null : _signIn,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: AppTheme.onPrimary,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(radius),
+                    ),
                   ),
-                ),
-                child: _loading
+                  child: _loading
                     ? const SizedBox(
                         height: 22,
                         width: 22,
@@ -582,6 +593,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           fontWeight: FontWeight.w600,
                         ),
                       ),
+                ),
               ),
             ],
           ),

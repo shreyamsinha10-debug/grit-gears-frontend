@@ -16,6 +16,7 @@ from app.core.config import (
     COLLECTION_GYM_ADMINS,
     COLLECTION_APP_CONFIG,
     COLLECTION_MESSAGES,
+    COLLECTION_EXPENSES,
 )
 
 client = AsyncIOMotorClient(settings.mongodb_url)
@@ -30,6 +31,7 @@ gym_admins_collection = db[COLLECTION_GYM_ADMINS]
 app_config_collection = db[COLLECTION_APP_CONFIG]
 messages_collection = db[COLLECTION_MESSAGES]
 member_documents_collection = db["member_documents"]
+expenses_collection = db[COLLECTION_EXPENSES]
 
 __all__ = [
     "client",
@@ -43,4 +45,5 @@ __all__ = [
     "app_config_collection",
     "messages_collection",
     "member_documents_collection",
+    "expenses_collection",
 ]

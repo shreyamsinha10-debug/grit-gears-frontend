@@ -286,9 +286,12 @@ class _BroadcastMessagesScreenState extends State<BroadcastMessagesScreen> {
     final padding = LayoutConstants.screenPadding(context);
     return Scaffold(
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new_rounded),
-          onPressed: () => Navigator.pop(context),
+        leading: Tooltip(
+          message: 'Back to dashboard',
+          child: IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded),
+            onPressed: () => Navigator.pop(context),
+          ),
         ),
         title: Text('Broadcast Messages', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
         actions: [

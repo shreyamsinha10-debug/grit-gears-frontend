@@ -335,6 +335,65 @@ class MemberImportResult(BaseModel):
     errors: list[dict] = []
 
 
+# --- Expenses ---
+
+class ExpenseCategory(str, Enum):
+    Electricity = "Electricity"
+    Water = "Water"
+    Housekeeping = "Housekeeping"
+    Maintenance = "Maintenance"
+    Rent = "Rent"
+    Salary = "Salary"
+    Marketing = "Marketing"
+    Software = "Software"
+    Other = "Other"
+
+
+class ExpenseCreate(BaseModel):
+    amount: int = Field(..., ge=0)
+    category: str = Field(..., min_length=1)
+    description: str | None = None
+    expense_date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+    receipt_ref: str | None = None
+
+
+class ExpenseResponse(BaseModel):
+    id: str
+    gym_id: str
+    amount: int
+    category: str
+    description: str | None = None
+    expense_date: str
+    receipt_ref: str | None = None
+    created_at: datetime
+
+
+class ExpenseUpdate(BaseModel):
+    amount: int | None = Field(None, ge=0)
+    category: str | None = None
+    description: str | None = None
+    expense_date: str | None = Field(None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    receipt_ref: str | None = None
+
+
+class BalanceSheetResponse(BaseModel):
+    month: str = Field(..., pattern=r"^\d{4}-\d{2}$")
+    total_collections: int = 0
+    total_expenses: int = 0
+    net_balance: int = 0
+    category_breakdown: dict[str, int] = Field(default_factory=dict)
+
+
+class RetentionAlertResponse(BaseModel):
+    """Member at risk of churn based on days since last visit."""
+    member_id: str
+    name: str
+    phone: str
+    last_attendance_date: date | None
+    days_since_last_visit: int
+    risk_level: str  # "Slipping" | "High Risk" | "Critical"
+
+
 __all__ = [
     "MembershipType",
     "Batch",
@@ -371,4 +430,10 @@ __all__ = [
     "SuperAdminPatchAdminBody",
     "SuperAdminResetPasswordBody",
     "MemberImportResult",
+    "ExpenseCategory",
+    "ExpenseCreate",
+    "ExpenseResponse",
+    "ExpenseUpdate",
+    "BalanceSheetResponse",
+    "RetentionAlertResponse",
 ]

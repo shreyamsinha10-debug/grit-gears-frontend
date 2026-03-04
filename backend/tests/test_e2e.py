@@ -240,6 +240,51 @@ async def test_export_endpoints(client: AsyncClient):
     assert r_payments.status_code == 200
 
 
+async def test_expenses_create_list_balance_sheet(client: AsyncClient):
+    """Expense management: create expense, list by month, get balance sheet."""
+    from datetime import date
+    month = date.today().strftime("%Y-%m")
+    day = date.today().strftime("%Y-%m-%d")
+
+    # POST /expenses
+    r_create = await client.post(
+        "/expenses",
+        json={
+            "amount": 1500,
+            "category": "Electricity",
+            "description": "E2E test bill",
+            "expense_date": day,
+            "receipt_ref": "REF-E2E-001",
+        },
+    )
+    assert r_create.status_code == 200, r_create.text
+    created = r_create.json()
+    assert created["amount"] == 1500
+    assert created["category"] == "Electricity"
+    assert created["expense_date"] == day
+    assert created["gym_id"]
+    assert created["id"]
+
+    # GET /expenses?month=YYYY-MM
+    r_list = await client.get("/expenses", params={"month": month})
+    assert r_list.status_code == 200, r_list.text
+    expenses = r_list.json()
+    assert isinstance(expenses, list)
+    assert any(e["id"] == created["id"] and e["amount"] == 1500 for e in expenses)
+
+    # GET /expenses/balance-sheet?month=YYYY-MM
+    r_sheet = await client.get("/expenses/balance-sheet", params={"month": month})
+    assert r_sheet.status_code == 200, r_sheet.text
+    sheet = r_sheet.json()
+    assert sheet["month"] == month
+    assert "total_collections" in sheet
+    assert "total_expenses" in sheet
+    assert "net_balance" in sheet
+    assert "category_breakdown" in sheet
+    assert sheet["total_expenses"] >= 1500
+    assert sheet["category_breakdown"].get("Electricity", 0) >= 1500
+
+
 async def test_get_member_404(client: AsyncClient):
     r = await client.get("/members/000000000000000000000000")
     assert r.status_code == 404
