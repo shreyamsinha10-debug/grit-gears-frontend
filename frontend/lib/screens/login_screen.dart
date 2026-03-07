@@ -102,7 +102,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           Icon(Icons.mark_email_read_outlined, color: AppTheme.primary, size: 48),
                           const SizedBox(height: 16),
                           Text(
-                            'If an account exists for that email or phone number, you’ll receive instructions to reset your password shortly.',
+                            'If an account exists for that email or phone, you’ll receive instructions shortly.',
                             style: GoogleFonts.poppins(fontSize: 14, color: onSurface),
                           ),
                         ],
@@ -112,7 +112,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Enter your email or mobile number and we’ll send you a link to reset your password.',
+                            'Enter your email or phone number. If a member account exists, we’ll send a reset link or temporary password to the email on file.',
                             style: GoogleFonts.poppins(fontSize: 14, color: onSurface),
                           ),
                           const SizedBox(height: 20),
@@ -121,9 +121,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             keyboardType: TextInputType.emailAddress,
                             maxLength: 50,
                             decoration: InputDecoration(
-                              labelText: 'Email or Mobile Number',
-                              hintText: 'e.g. 8447594017 or email@example.com',
-                              prefixIcon: const Icon(Icons.phone_android_outlined, size: 22),
+                              labelText: 'Email or phone',
+                              hintText: 'e.g. you@example.com or 9876543210',
+                              prefixIcon: const Icon(Icons.email_outlined, size: 22),
                               filled: true,
                               fillColor: surface,
                               border: OutlineInputBorder(borderRadius: BorderRadius.circular(radius)),
@@ -157,17 +157,42 @@ class _LoginScreenState extends State<LoginScreen> {
                             final value = controller.text.trim();
                             if (value.isEmpty) {
                               ScaffoldMessenger.of(ctx).showSnackBar(
-                                const SnackBar(content: Text('Enter email or mobile number')),
+                                const SnackBar(content: Text('Enter your email or phone')),
                               );
                               return;
                             }
-                            loading = true;
-                            setDialogState(() {});
-                            await Future.delayed(const Duration(milliseconds: 800));
-                            if (!ctx.mounted) return;
-                            loading = false;
-                            sent = true;
-                            setDialogState(() {});
+                            // If it looks like email, require @ and .
+                            if (value.contains('@') && (!value.contains('.'))) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                const SnackBar(content: Text('Please enter a valid email address')),
+                              );
+                              return;
+                            }
+                            setDialogState(() => loading = true);
+                            try {
+                              final res = await ApiClient.instance.post(
+                                '/auth/forgot-password',
+                                headers: {'Content-Type': 'application/json'},
+                                body: jsonEncode({'email_or_phone': value}),
+                              );
+                              if (!ctx.mounted) return;
+                              if (res.statusCode >= 200 && res.statusCode < 300) {
+                                setDialogState(() { loading = false; sent = true; });
+                              } else {
+                                final body = jsonDecode(res.body) as Map<String, dynamic>?;
+                                final detail = body?['detail']?.toString() ?? 'Request failed';
+                                setDialogState(() => loading = false);
+                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                  SnackBar(content: Text(detail)),
+                                );
+                              }
+                            } catch (e) {
+                              if (!ctx.mounted) return;
+                              setDialogState(() => loading = false);
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                SnackBar(content: Text('Error: ${e.toString().split('\n').first}')),
+                              );
+                            }
                           },
                     style: FilledButton.styleFrom(
                       backgroundColor: AppTheme.primary,

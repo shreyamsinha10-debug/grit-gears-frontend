@@ -1,10 +1,11 @@
 """
 FastAPI application entrypoint for the GymSaaS backend.
-
-This is the canonical app: lifespan, CORS, health routes, and the aggregated API router.
-All feature routes live under app.api.routers and are mounted via api_router.
 """
 
+import json
+import logging
+import time
+from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
@@ -27,6 +28,26 @@ from app.db.indexes import ensure_indexes
 from app.utils.time_utils import today_ist
 
 MIN_APP_VERSION = "1.0.0"
+
+# #region agent log
+def _debug_log(location: str, message: str, data: dict, hypothesis_id: str):
+    payload = json.dumps({"sessionId": "1cf765", "location": location, "message": message, "data": data, "timestamp": int(time.time() * 1000), "hypothesisId": hypothesis_id}) + "\n"
+    for log_path in [
+        Path("/home/animesh/Documents/GymSaaS/.cursor/debug-1cf765.log"),
+        Path(__file__).resolve().parent.parent / "debug-1cf765.log",
+    ]:
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_path, "a") as f:
+                f.write(payload)
+            break
+        except Exception:
+            continue
+# #endregion
+
+# So email send/skip/fail is visible in the terminal when testing forgot-password
+logging.basicConfig(level=logging.INFO)
+logging.getLogger("app.utils.email").setLevel(logging.INFO)
 
 
 @asynccontextmanager
@@ -92,6 +113,10 @@ app.add_middleware(
 
 class LocalhostCORSMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        # #region agent log
+        if request.url.path == "/auth/forgot-password" and request.method == "POST":
+            _debug_log("main.py:middleware", "POST /auth/forgot-password received", {"path": request.url.path}, "E")
+        # #endregion
         response = await call_next(request)
         origin = request.headers.get("origin")
         if origin and (
