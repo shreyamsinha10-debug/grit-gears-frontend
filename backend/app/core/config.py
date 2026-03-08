@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     smtp_password: str | None = Field(default=None, alias="SMTP_PASSWORD")
     from_email: str | None = Field(default=None, alias="FROM_EMAIL")
 
+    # Base URL for password-reset and registration links (where app/web is hosted).
+    # No trailing slash. Example: https://gymopshq.web.app or https://yourapp.com
+    frontend_url: str | None = Field(default=None, alias="FRONTEND_URL")
+
     backend_label: str | None = Field(default=None, alias="BACKEND_LABEL")
 
 

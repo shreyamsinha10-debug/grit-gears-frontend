@@ -17,8 +17,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'core/api_client.dart';
 import 'core/app_constants.dart';
 import 'core/secure_storage.dart';
+import 'core/url_token_helper.dart';
 import 'theme/app_theme.dart';
 import 'screens/login_screen.dart';
+import 'screens/reset_password_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -61,9 +63,26 @@ class _MyAppState extends State<MyApp> {
       // "GlobalKey used multiple times" (ink renderer) when theme changes.
       home: KeyedSubtree(
         key: ValueKey<ThemeMode>(_themeMode),
-        child: MyHomePage(title: defaultGymName, onThemeChanged: setThemeDark),
+        child: _InitialRoute(title: defaultGymName, onThemeChanged: setThemeDark),
       ),
     );
+  }
+}
+
+/// Decides first screen: ResetPasswordScreen if URL has ?token= (e.g. from email link), else MyHomePage.
+class _InitialRoute extends StatelessWidget {
+  const _InitialRoute({required this.title, this.onThemeChanged});
+
+  final String title;
+  final void Function(bool dark)? onThemeChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final token = getResetTokenFromUrl();
+    if (token != null && token.isNotEmpty) {
+      return ResetPasswordScreen(token: token);
+    }
+    return MyHomePage(title: title, onThemeChanged: onThemeChanged);
   }
 }
 

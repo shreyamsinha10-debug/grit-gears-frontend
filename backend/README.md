@@ -36,6 +36,8 @@ python -m uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 - API docs: http://localhost:8000/docs  
 - OpenAPI JSON: http://localhost:8000/openapi.json  
 
+**Checking logs:** When you run the backend in a terminal, all logs appear there. For email (forgot-password, test): look for `INFO:app.utils.email:Email sent to ...` (success), `WARNING:app.utils.email:Email skipped: ...` (SMTP not configured), or `ERROR:... Email failed to ...` (SMTP error). Run from the `backend` directory so `backend/.env` is loaded.
+
 In the Flutter app, set the server URL to `http://localhost:8000` (e.g. via "Set server URL" or `API_BASE_URL` when building).
 
 1. **In the app (easiest):** Run the Flutter app, then use **Set server URL** (or the URL field on login/home) and set it to `http://localhost:8000` (no trailing slash). The app persists this for next runs.
@@ -62,7 +64,7 @@ In the Flutter app, set the server URL to `http://localhost:8000` (e.g. via "Set
 | 4 | Start frontend: `cd frontend && flutter run -d chrome --dart-define=API_BASE_URL=http://localhost:8000`. Set server URL in app to `http://localhost:8000` if you didn’t use the dart-define. |
 | 5 | In the app: Admin login → create gym/admin if needed → Members, Billing, Attendance, Export. Member login with a registered phone and OTP `123456`. |
 
-If you use **Option B**, you can also test `POST /auth/forgot-password` in Swagger (http://localhost:8000/docs) with a body like `{"email_or_phone": "e2e_admin"}`.
+If you use **Option B**, you can also test `POST /auth/forgot-password` in Swagger (http://localhost:8000/docs) with a body like `{"email": "member@example.com"}` (use an email that exists for a member).
 
 ## Environment
 
@@ -84,6 +86,17 @@ The **refactored backend has no default values** for required settings. If any r
 | `ALLOWED_ORIGINS` | `https://your-app.web.app,http://localhost:8080` | Comma-separated; include your frontend and any app origins |
 
 Optional: `BACKEND_LABEL` (e.g. `Railway`) so `GET /` returns it for health checks.
+
+**Optional – Password reset and email:**
+
+| Variable | Example | Notes |
+|----------|---------|--------|
+| `SMTP_SERVER` | `smtpout.secureserver.net` | GoDaddy: [SMTP settings](https://www.godaddy.com/help/set-up-third-party-plugins-or-websites-using-smtp-settings-42788) (port 465, SSL) |
+| `SMTP_PORT` | `465` | |
+| `SMTP_USERNAME` | `contact@yourdomain.com` | Usually same as FROM_EMAIL |
+| `SMTP_PASSWORD` | Your email password | |
+| `FROM_EMAIL` | `contact@yourdomain.com` | Sender address for reset emails |
+| `FRONTEND_URL` | `https://your-app.web.app` | Base URL where the app is hosted (no trailing slash). Forgot-password emails send a link like `FRONTEND_URL/?token=xxx`. Set this for reset-link flow; if unset, a temporary password is emailed instead. |
 
 **Start command** (from repo root or from `backend`):
 
