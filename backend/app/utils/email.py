@@ -36,6 +36,7 @@ async def send_email_async(to_addresses: Iterable[str], subject: str, body: str)
     application behaviour remains stable in environments without email.
     """
     recipients: Sequence[str] = [addr for addr in to_addresses if addr]
+    logger.info("Sending email to %s (subject: %s)", ", ".join(recipients), subject)
     # #region agent log
     _debug_log("email.py:send_email_async:entry", "send_email_async called", {"recipients_count": len(recipients), "recipients": list(recipients)[:3], "subject": subject}, "D")
     # #endregion
@@ -61,12 +62,14 @@ async def send_email_async(to_addresses: Iterable[str], subject: str, body: str)
     msg["To"] = ", ".join(recipients)
     msg.set_content(body)
 
+    timeout_sec = 25  # avoid hanging forever if SMTP is unreachable (e.g. Railway → GoDaddy)
+
     def _send():
         if int(settings.smtp_port) == 465:
             server_cls = smtplib.SMTP_SSL
         else:
             server_cls = smtplib.SMTP
-        with server_cls(settings.smtp_server, int(settings.smtp_port)) as server:
+        with server_cls(settings.smtp_server, int(settings.smtp_port), timeout=timeout_sec) as server:
             server.ehlo()
             if settings.smtp_username and settings.smtp_password:
                 server.login(settings.smtp_username, settings.smtp_password)
