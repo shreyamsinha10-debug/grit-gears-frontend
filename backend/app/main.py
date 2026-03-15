@@ -93,6 +93,13 @@ async def lifespan(app: FastAPI):
         {"$set": {"status": "Inactive"}},
     )
 
+    # Warn if forgot-password emails will not be sent (SMTP not configured)
+    if not settings.smtp_server or not settings.smtp_port or not settings.from_email:
+        logging.getLogger("app.main").warning(
+            "Forgot-password emails disabled: SMTP not configured. "
+            "Set SMTP_SERVER, SMTP_PORT, FROM_EMAIL (and optionally SMTP_USERNAME, SMTP_PASSWORD) in backend/.env"
+        )
+
     # Run auto check-out once at startup (then every interval)
     await run_auto_checkout()
 

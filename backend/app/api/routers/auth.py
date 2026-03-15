@@ -3,6 +3,7 @@ Auth router – login (super_admin, gym_admin, member), owner-claim, forgot-pass
 """
 
 import json
+import logging
 import os
 import re
 import secrets
@@ -28,6 +29,7 @@ from app.utils.email import send_email_async
 from app.utils.helpers import doc_to_member_response
 from app.utils.time_utils import normalize_phone, today_ist
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # #region agent log
@@ -333,6 +335,17 @@ async def forgot_password(body: ForgotPasswordRequest) -> ForgotPasswordResponse
     _debug_log("auth.py:forgot_password:after_lookup", "lookup result", {"member_found": member_doc is not None, "admin_found": admin_doc is not None, "has_recipients": bool(recipients), "identifier": identifier}, "B")
     # #endregion
 
+    # So you can see in the terminal why email was or wasn't sent
+    logger.info(
+        "Forgot-password: identifier=%s, admin_found=%s, member_found=%s, recipients=%s",
+        identifier,
+        admin_doc is not None,
+        member_doc is not None,
+        recipients,
+    )
+    if not recipients and not (admin_doc or member_doc):
+        logger.info("Forgot-password: no account found for %r, email not sent (add as gym admin login_id or member email)", identifier)
+
     base_url = (settings.frontend_url or os.environ.get("FRONTEND_URL") or "").strip()
 
     # Gym admin path: reset link if FRONTEND_URL set, else temporary password
@@ -362,10 +375,12 @@ async def forgot_password(body: ForgotPasswordRequest) -> ForgotPasswordResponse
         )
 
     if not member_doc:
+        logger.info("Forgot-password: no member or admin found for %r, returning generic message (no email sent)", identifier)
         return ForgotPasswordResponse(
             message="If an account exists for that email or phone, you will receive instructions shortly."
         )
     if not recipients:
+        logger.info("Forgot-password: member found for %r but no email on file, no email sent", identifier)
         return ForgotPasswordResponse(
             message="If an account exists for that email or phone, you will receive instructions shortly."
         )

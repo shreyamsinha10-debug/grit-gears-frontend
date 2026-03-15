@@ -47,7 +47,8 @@ async def send_email_async(to_addresses: Iterable[str], subject: str, body: str)
         _debug_log("email.py:send_email_async:skip", "SMTP not configured", {"smtp_server": bool(settings.smtp_server), "smtp_port": bool(settings.smtp_port), "from_email": bool(settings.from_email)}, "D")
         # #endregion
         logger.warning(
-            "Email skipped: SMTP not configured (set SMTP_SERVER, SMTP_PORT, FROM_EMAIL in .env or environment)"
+            "Email skipped: SMTP not configured. Forgot-password and other emails will not be sent. "
+            "Set SMTP_SERVER, SMTP_PORT, and FROM_EMAIL in backend/.env (see .env.example)."
         )
         return
 
