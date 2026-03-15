@@ -6,8 +6,11 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/api_client.dart';
+import '../core/app_constants.dart';
 import '../core/image_compression.dart';
 import '../theme/app_theme.dart';
 import 'login_screen.dart';
@@ -207,6 +210,48 @@ class _GymSettingsScreenState extends State<GymSettingsScreen> {
       if (mounted) setState(() => _error = 'Could not save. Check connection.');
     }
     if (mounted) setState(() => _saving = false);
+  }
+
+  Future<void> _showSetServerUrlDialog() async {
+    final controller = TextEditingController(text: ApiClient.baseUrl);
+    if (!mounted) return;
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Set server URL'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            hintText: 'https://your-backend.up.railway.app',
+            border: OutlineInputBorder(),
+          ),
+          autocorrect: false,
+          keyboardType: TextInputType.url,
+          onSubmitted: (_) => Navigator.of(ctx).pop(true),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (updated != true || !mounted) return;
+    final url = controller.text.trim();
+    if (url.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(ApiClient.prefsKey, url);
+    ApiClient.overrideBaseUrl = url;
+    setState(() {});
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Server URL set to $url')),
+    );
   }
 
   /// Format "06:00" / "18:00" to "6:00 am" / "6:00 pm" for display.
@@ -1168,6 +1213,60 @@ class _GymSettingsScreenState extends State<GymSettingsScreen> {
             onPressed: _saving ? null : _save,
             style: FilledButton.styleFrom(backgroundColor: AppTheme.primary, foregroundColor: AppTheme.onPrimary, padding: const EdgeInsets.symmetric(vertical: 16)),
             child: Text(_saving ? 'Saving...' : 'Save changes', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 15)),
+          ),
+          const SizedBox(height: 40),
+          Divider(color: theme.colorScheme.outline.withOpacity(0.5)),
+          const SizedBox(height: 20),
+          Text(
+            kAppVersionDisplay,
+            style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600, color: AppTheme.onSurface),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 6),
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () async {
+                try {
+                  await launchUrl(Uri.parse(kPoweredByUrl), mode: LaunchMode.externalApplication);
+                } catch (_) {
+                  if (mounted) {
+                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                      const SnackBar(content: Text('Could not open link')),
+                    );
+                  }
+                }
+              },
+              child: Text(
+                kPoweredBy,
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  color: Colors.grey.shade600,
+                  decoration: TextDecoration.underline,
+                  decorationColor: Colors.grey.shade600,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Flexible(
+                child: Text(
+                  ApiClient.baseUrl,
+                  style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade600),
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: _showSetServerUrlDialog,
+                child: const Text('Set server URL'),
+              ),
+            ],
           ),
           const SizedBox(height: 32),
         ],

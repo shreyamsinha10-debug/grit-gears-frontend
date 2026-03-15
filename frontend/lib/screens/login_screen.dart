@@ -12,7 +12,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../core/api_client.dart';
+import '../core/app_constants.dart';
 import '../core/secure_storage.dart';
+import '../core/theme_changer_scope.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
 import 'admin_dashboard_screen.dart';
@@ -56,6 +58,51 @@ class _LoginScreenState extends State<LoginScreen> {
     if (widget.initialMessage != null && widget.initialMessage!.trim().isNotEmpty) {
       _error = widget.initialMessage;
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      precacheImage(const AssetImage(defaultLogoAsset), context);
+      _checkUpdate();
+    });
+  }
+
+  static bool _isVersionOlder(String current, String required) {
+    final c = current.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+    final r = required.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+    for (var i = 0; i < c.length || i < r.length; i++) {
+      final cv = i < c.length ? c[i] : 0;
+      final rv = i < r.length ? r[i] : 0;
+      if (cv < rv) return true;
+      if (cv > rv) return false;
+    }
+    return false;
+  }
+
+  Future<void> _checkUpdate() async {
+    try {
+      final r = await ApiClient.instance.get('/version', useCache: false);
+      if (r.statusCode != 200 || !mounted) return;
+      final body = jsonDecode(r.body) as Map<String, dynamic>?;
+      final minVer = body?['min_app_version']?.toString();
+      if (minVer == null || minVer.isEmpty) return;
+      if (!_isVersionOlder(kAppVersion, minVer)) return;
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Update required'),
+          content: const Text(
+            'A new version of the app is available. Please update from the Play Store to continue.',
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    } catch (_) {}
   }
 
   @override
@@ -364,19 +411,39 @@ class _LoginScreenState extends State<LoginScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
               const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Tooltip(
-                  message: 'Go back',
-                  child: TextButton.icon(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
-                    label: const Text('Back'),
-                    style: TextButton.styleFrom(
-                      foregroundColor: Colors.grey.shade600,
-                    ),
-                  ),
-                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  if (Navigator.of(context).canPop())
+                    Tooltip(
+                      message: 'Go back',
+                      child: TextButton.icon(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
+                        label: const Text('Back'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.grey.shade600,
+                        ),
+                      ),
+                    )
+                  else
+                    const SizedBox.shrink(),
+                  if (ThemeChangerScope.maybeOf(context) != null)
+                    Builder(
+                      builder: (context) {
+                        final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+                        return Tooltip(
+                          message: isDarkMode ? 'Light mode' : 'Dark mode',
+                          child: IconButton(
+                            icon: Icon(isDarkMode ? Icons.light_mode : Icons.dark_mode),
+                            onPressed: () => ThemeChangerScope.maybeOf(context)!.setThemeDark(!isDarkMode),
+                          ),
+                        );
+                      },
+                    )
+                  else
+                    const SizedBox.shrink(),
+                ],
               ),
               const SizedBox(height: 8),
               // Logo + App name row
@@ -441,16 +508,6 @@ class _LoginScreenState extends State<LoginScreen> {
                   fontSize: 15,
                   color: isDark ? Colors.grey.shade400 : Colors.grey.shade700,
                 ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Server: ${ApiClient.baseUrl}',
-                style: GoogleFonts.poppins(
-                  fontSize: 11,
-                  color: (isDark ? Colors.grey.shade500 : Colors.grey.shade600).withOpacity(0.9),
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 32),
               // Email or Mobile Number

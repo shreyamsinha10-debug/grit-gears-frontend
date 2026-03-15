@@ -19,7 +19,11 @@ from app.core.config import (
     COLLECTION_EXPENSES,
 )
 
-client = AsyncIOMotorClient(settings.mongodb_url)
+# Fail fast if Atlas/local DB is unreachable (e.g. DNS timeout, offline).
+client = AsyncIOMotorClient(
+    settings.mongodb_url,
+    serverSelectionTimeoutMS=10_000,
+)
 db = client[settings.database_name]
 
 members_collection = db[COLLECTION_MEMBERS]
