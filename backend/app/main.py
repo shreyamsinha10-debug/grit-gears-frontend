@@ -2,11 +2,12 @@
 FastAPI application entrypoint for the GymSaaS backend.
 """
 
+import asyncio
 import json
 import logging
 import time
-from pathlib import Path
 from contextlib import asynccontextmanager
+from pathlib import Path
 from datetime import datetime, timedelta
 
 from fastapi import FastAPI
@@ -25,6 +26,7 @@ from app.db.database import (
     payments_collection,
 )
 from app.db.indexes import ensure_indexes
+from app.tasks.attendance_tasks import run_auto_checkout
 from app.utils.time_utils import today_ist
 
 MIN_APP_VERSION = "1.0.0"
@@ -90,7 +92,31 @@ async def lifespan(app: FastAPI):
         {"last_attendance_date": {"$exists": True, "$lt": cutoff_dt}},
         {"$set": {"status": "Inactive"}},
     )
-    yield
+
+    # Run auto check-out once at startup (then every interval)
+    await run_auto_checkout()
+
+    interval = settings.auto_checkout_interval_seconds
+
+    async def auto_checkout_loop() -> None:
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await run_auto_checkout()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass  # Log and continue next interval
+
+    auto_checkout_task = asyncio.create_task(auto_checkout_loop())
+    try:
+        yield
+    finally:
+        auto_checkout_task.cancel()
+        try:
+            await auto_checkout_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="Gym API", lifespan=lifespan)

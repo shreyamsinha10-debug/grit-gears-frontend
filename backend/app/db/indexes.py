@@ -6,7 +6,13 @@ provides an async entrypoint that can be called from the FastAPI lifespan
 without altering existing behaviour.
 """
 
+import logging
+
+from pymongo.errors import OperationFailure
+
 from motor.motor_asyncio import AsyncIOMotorDatabase
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import (
     COLLECTION_MEMBERS,
@@ -31,14 +37,48 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
 
     # Members: filter by gym_id + status, and login by phone + gym_id
     await members.create_index([("gym_id", 1), ("status", 1)], name="members_gym_status")
-    await members.create_index(
-        [("phone", 1), ("gym_id", 1)], name="members_phone_gym", unique=False, sparse=True
-    )
+    # Phone unique per gym: no duplicate members with same phone in one gym
+    try:
+        await members.create_index(
+            [("phone", 1), ("gym_id", 1)], name="members_phone_gym", unique=True, sparse=True
+        )
+    except OperationFailure as e:
+        if e.code == 86:  # IndexKeySpecsConflict: same name, different options (e.g. old non-unique)
+            await members.drop_index("members_phone_gym")
+            try:
+                await members.create_index(
+                    [("phone", 1), ("gym_id", 1)], name="members_phone_gym", unique=True, sparse=True
+                )
+            except OperationFailure as e2:
+                if e2.code == 11000:  # DuplicateKey: collection has duplicate (phone, gym_id)
+                    logger.warning(
+                        "members_phone_gym: cannot create unique index due to duplicate phone numbers. "
+                        "Recreating non-unique index so app can start. Fix duplicates then restart."
+                    )
+                    await members.create_index(
+                        [("phone", 1), ("gym_id", 1)], name="members_phone_gym", unique=False, sparse=True
+                    )
+                else:
+                    raise
+        elif e.code == 11000:  # DuplicateKey on first create (e.g. after manual drop)
+            logger.warning(
+                "members_phone_gym: duplicate phone numbers exist. Using non-unique index."
+            )
+            await members.create_index(
+                [("phone", 1), ("gym_id", 1)], name="members_phone_gym", unique=False, sparse=True
+            )
+        else:
+            raise
 
     # Attendance: queries by member_id + date_ist (+ gym_id)
     await attendance.create_index(
         [("member_id", 1), ("date_ist", 1), ("gym_id", 1)],
         name="attendance_member_date_gym",
+    )
+    # Auto check-out: find today's open check-ins older than 2h
+    await attendance.create_index(
+        [("date_ist", 1), ("check_in_at_utc", 1)],
+        name="attendance_date_checkin_autocheckout",
     )
 
     # Payments: common filters by gym_id + status, and member_id + period

@@ -11,6 +11,7 @@ gym_admin token for all requests.
 """
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 _backend = Path(__file__).resolve().parent.parent
@@ -19,6 +20,10 @@ if str(_backend) not in sys.path:
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+
+from app.db.database import attendance_collection
+from app.tasks.attendance_tasks import run_auto_checkout
+from app.utils.time_utils import today_ist
 
 try:
     from pymongo.errors import ServerSelectionTimeoutError
@@ -151,6 +156,42 @@ async def test_attendance_check_in_check_out(client: AsyncClient):
     r_out = await client.post(f"/attendance/check-out/{member_id}")
     assert r_out.status_code == 200, r_out.text
     assert r_out.json()["check_out_at"] is not None
+
+
+async def test_auto_checkout_after_2_hours(client: AsyncClient):
+    """Auto check-out: if member checked in >2h ago and has not checked out, they are auto-checked out."""
+    payload = {
+        "name": "Auto Checkout Test",
+        "phone": "9876543219",
+        "email": "autoco@example.com",
+        "membership_type": "Regular",
+        "batch": "Morning",
+    }
+    r = await client.post("/members", json=payload)
+    assert r.status_code == 200, r.text
+    member_id = r.json()["id"]
+
+    r_in = await client.post(f"/attendance/check-in/{member_id}")
+    assert r_in.status_code == 200, r_in.text
+    assert r_in.json()["check_out_at"] is None
+
+    date_ist_str = today_ist().strftime("%Y-%m-%d")
+    backdate_utc = datetime.now(timezone.utc) - timedelta(hours=3)
+    result = await attendance_collection.update_one(
+        {"member_id": member_id, "date_ist": date_ist_str},
+        {"$set": {"check_in_at_utc": backdate_utc}},
+    )
+    assert result.modified_count == 1, "Failed to backdate check-in"
+
+    n = await run_auto_checkout()
+    assert n >= 1, "run_auto_checkout should have updated at least one record"
+
+    r_today = await client.get("/attendance/today")
+    assert r_today.status_code == 200
+    today_list = r_today.json()
+    record = next((e for e in today_list if e["member_id"] == member_id), None)
+    assert record is not None, "Member should appear in today's attendance"
+    assert record["check_out_at"] is not None, "Member should be auto-checked out after 2 hours"
 
 
 async def test_payments_and_log_monthly(client: AsyncClient):

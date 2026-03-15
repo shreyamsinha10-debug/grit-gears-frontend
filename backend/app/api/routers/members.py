@@ -2,12 +2,14 @@
 Members router: CRUD, by-phone, attendance-stats, import.
 """
 
+import re
 from datetime import datetime, time, timezone
 from io import BytesIO
 
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
+from pymongo.errors import DuplicateKeyError
 import jwt
 
 from app.core.auth import get_gym_admin, get_gym_id_for_attendance_or_member_get
@@ -15,6 +17,7 @@ from app.core.config import settings
 from app.core.security import _pwd_fallback, pwd_context
 from app.db.database import (
     gyms_collection,
+    invoices_collection,
     member_documents_collection,
     members_collection,
     payments_collection,
@@ -47,6 +50,12 @@ async def create_member(member: MemberCreate, gym_id: str = Depends(get_gym_admi
     doc["phone"] = normalize_phone(doc.get("phone") or "")
     if not doc["phone"]:
         raise HTTPException(status_code=400, detail="Phone must contain at least one digit")
+    existing = await members_collection.find_one({**gym_filter(gym_id), "phone": doc["phone"]})
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail="A member with this phone number already exists. Phone number must be unique.",
+        )
     doc["created_at"] = datetime.now(timezone.utc)
     mt = doc["membership_type"].value if isinstance(doc["membership_type"], MembershipType) else doc["membership_type"]
     plan = None
@@ -65,7 +74,13 @@ async def create_member(member: MemberCreate, gym_id: str = Depends(get_gym_admi
             raise HTTPException(status_code=400, detail="Membership plan not found")
     doc["workout_schedule"] = doc.get("workout_schedule")
     doc["diet_chart"] = doc.get("diet_chart")
-    result = await members_collection.insert_one(doc)
+    try:
+        result = await members_collection.insert_one(doc)
+    except DuplicateKeyError:
+        raise HTTPException(
+            status_code=400,
+            detail="A member with this phone number already exists in this gym. Phone number must be unique.",
+        )
     mid = str(result.inserted_id)
     doc["_id"] = result.inserted_id
 
@@ -252,11 +267,18 @@ async def list_members(
     limit: int = 100,
     brief: bool = False,
     include_avatar: bool = False,
+    search: str | None = None,
     gym_id: str = Depends(get_gym_admin),
 ):
     skip = max(0, skip)
     limit = min(max(1, limit), 500)
     q = gym_filter(gym_id)
+    if search and search.strip():
+        term = re.escape(search.strip())
+        q["$or"] = [
+            {"name": {"$regex": term, "$options": "i"}},
+            {"phone": {"$regex": term, "$options": "i"}},
+        ]
     cursor = members_collection.find(q).sort("created_at", -1).skip(skip).limit(limit)
 
     date_ist_str = today_ist().strftime("%Y-%m-%d")
@@ -297,6 +319,17 @@ async def update_member(member_id: str, body: MemberUpdate, gym_id: str = Depend
         update["phone"] = normalize_phone(body.phone)
         if not update["phone"]:
             raise HTTPException(status_code=400, detail="Phone must contain at least one digit")
+        # Prevent changing to a phone that another member in this gym already has
+        other = await members_collection.find_one({
+            **gym_filter(gym_id),
+            "phone": update["phone"],
+            "_id": {"$ne": oid},
+        })
+        if other:
+            raise HTTPException(
+                status_code=400,
+                detail="A member with this phone number already exists. Phone number must be unique.",
+            )
     if body.email is not None:
         update["email"] = body.email
     if body.membership_type is not None:
@@ -355,6 +388,27 @@ async def reset_member_password(member_id: str, body: MemberResetPasswordBody, g
         {"$set": {"password_hash": password_hash, "updated_at": datetime.now(timezone.utc)}}
     )
     return {"message": "Password reset successfully"}
+
+
+@router.delete("/members/{member_id}", status_code=204)
+async def delete_member(member_id: str, gym_id: str = Depends(get_gym_admin)):
+    """Permanently delete a member and all their related data. Cannot be undone."""
+    try:
+        oid = ObjectId(member_id)
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="Invalid member ID")
+    member_q = {"_id": oid}
+    member_q.update(gym_filter(gym_id))
+    doc = await members_collection.find_one(member_q)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    gfilter = gym_filter(gym_id)
+    await attendance_collection.delete_many({**gfilter, "member_id": member_id})
+    await payments_collection.delete_many({**gfilter, "member_id": member_id})
+    await invoices_collection.delete_many({**gfilter, "member_id": member_id})
+    await member_documents_collection.delete_many({"member_id": member_id, **gfilter})
+    await members_collection.delete_one(member_q)
 
 
 def _parse_import_date(s: str):
@@ -507,7 +561,11 @@ async def import_members_excel(file: UploadFile = File(...), gym_id: str = Depen
                     "gender": set_fields.get("gender"),
                     "date_of_birth": datetime.combine(date_of_birth, time.min) if date_of_birth is not None else None,
                 }
-                result = await members_collection.insert_one(doc)
+                try:
+                    result = await members_collection.insert_one(doc)
+                except DuplicateKeyError:
+                    errors.append({"row": row_num, "message": "Duplicate phone number in this gym; member already exists."})
+                    continue
                 mid = str(result.inserted_id)
                 mt = doc["membership_type"]
                 monthly_amount = await resolve_monthly_fee(gym_id, mt)

@@ -6,8 +6,8 @@
 // quick check-in from list. Defines local [Member] model for UI.
 // ---------------------------------------------------------------------------
 
+import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -22,64 +22,15 @@ import 'attendance_report_screen.dart';
 
 export '../models/models.dart' show Member;
 
-// ---------------------------------------------------------------------------
-// Session-level avatar cache — each photo is fetched at most once per session.
-// Key: member ID, Value: decoded JPEG/PNG bytes (null = no photo).
-// ---------------------------------------------------------------------------
-final Map<String, Uint8List?> _avatarCache = {};
-
-/// Lazily loads and caches a member's profile photo.
-/// Shows the initial-letter placeholder until the photo arrives.
-class _MemberAvatarWidget extends StatefulWidget {
-  final String memberId;
-  final String memberName;
-  const _MemberAvatarWidget({required this.memberId, required this.memberName});
-
-  @override
-  State<_MemberAvatarWidget> createState() => _MemberAvatarWidgetState();
-}
-
-class _MemberAvatarWidgetState extends State<_MemberAvatarWidget> {
-  Uint8List? _bytes;
-
-  @override
-  void initState() {
-    super.initState();
-    if (_avatarCache.containsKey(widget.memberId)) {
-      _bytes = _avatarCache[widget.memberId];
-    } else {
-      _fetchAvatar();
-    }
-  }
-
-  Future<void> _fetchAvatar() async {
-    try {
-      final r = await ApiClient.instance.get('/members/${widget.memberId}/photo', useCache: false);
-      if (r.statusCode == 200) {
-        final data = jsonDecode(r.body) as Map<String, dynamic>;
-        final b64 = data['photo_base64'] as String?;
-        final bytes = b64 != null && b64.isNotEmpty ? base64Decode(b64) : null;
-        _avatarCache[widget.memberId] = bytes;
-        if (mounted) setState(() => _bytes = bytes);
-        return;
-      }
-    } catch (_) {}
-    _avatarCache[widget.memberId] = null;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final initial = (widget.memberName.isNotEmpty ? widget.memberName[0] : '?').toUpperCase();
-    return CircleAvatar(
-      radius: 22,
-      backgroundColor: AppTheme.primary.withOpacity(0.2),
-      foregroundColor: AppTheme.primary,
-      backgroundImage: _bytes != null ? MemoryImage(_bytes!) : null,
-      child: _bytes == null
-          ? Text(initial, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))
-          : null,
-    );
-  }
+/// Avatar for member list: first letter of name only (no profile photo) for fast loading.
+Widget _memberListAvatar(String memberName) {
+  final initial = (memberName.isNotEmpty ? memberName[0] : '?').toUpperCase();
+  return CircleAvatar(
+    radius: 22,
+    backgroundColor: AppTheme.primary.withOpacity(0.2),
+    foregroundColor: AppTheme.primary,
+    child: Text(initial, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+  );
 }
 
 class DashboardScreen extends StatefulWidget {
@@ -101,16 +52,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final Set<String> _checkingOutIds = {};
   bool _runningAdminAction = false;
 
-  List<Member> get _filteredMembers {
-    final q = widget.searchQuery?.trim().toLowerCase();
-    if (q == null || q.isEmpty) return _members;
-    return _members.where((m) => m.name.toLowerCase().contains(q)).toList();
-  }
+  /// When searchQuery is set, API returns filtered list; otherwise we show loaded _members.
+  List<Member> get _filteredMembers => _members;
+
+  Timer? _searchDebounce;
 
   @override
   void initState() {
     super.initState();
     _loadMembers();
+  }
+
+  @override
+  void didUpdateWidget(covariant DashboardScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.searchQuery != widget.searchQuery) {
+      _searchDebounce?.cancel();
+      _searchDebounce = Timer(const Duration(milliseconds: 400), () {
+        if (!mounted) return;
+        _loadMembers();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    super.dispose();
   }
 
   static const int _pageSize = 50;
@@ -119,6 +87,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _loadingMore = false;
 
   Future<void> _loadMembers({bool append = false}) async {
+    final search = widget.searchQuery?.trim();
+    final useSearch = search != null && search.isNotEmpty;
     if (!append) {
       setState(() { _loading = true; _error = null; _skip = 0; _hasMore = true; });
     } else {
@@ -126,10 +96,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     try {
+      final params = <String, String>{
+        'brief': 'true',
+        'include_avatar': 'false',
+        'skip': '$_skip',
+        'limit': '$_pageSize',
+      };
+      if (useSearch) params['search'] = search!;
       final response = await ApiClient.instance.get(
         '/members',
-        queryParameters: {'brief': 'true', 'include_avatar': 'false', 'skip': '$_skip', 'limit': '$_pageSize'},
-        useCache: !append,
+        queryParameters: params,
+        useCache: !append && !useSearch,
       );
 
       if (!mounted) return;
@@ -667,7 +644,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   Row(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      _MemberAvatarWidget(memberId: m.id, memberName: m.name),
+                                      _memberListAvatar(m.name),
                                       const SizedBox(width: 12),
                                       Expanded(
                                         child: Column(

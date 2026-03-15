@@ -481,22 +481,37 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> with SingleTick
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Remove member?'),
-        content: Text(
-          '${_member.name} will be set to Inactive and removed from the active list. You can re-activate later.',
+        title: const Text('Permanently delete member?'),
+        content: const Text(
+          'This will permanently delete this member and all their data (attendance, payments, invoices). '
+          'Once deleted there is no going back. This cannot be undone.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('No')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Yes, remove'),
+            child: const Text('Yes, delete permanently'),
           ),
         ],
       ),
     );
     if (confirm != true || !mounted) return;
-    await _cancelMembership();
+    try {
+      final r = await ApiClient.instance.delete('/members/${_member.id}');
+      if (mounted) {
+        if (r.statusCode == 204 || (r.statusCode >= 200 && r.statusCode < 300)) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Member permanently deleted')));
+          Navigator.pop(context, true);
+        } else {
+          final body = r.body;
+          final detail = body.isNotEmpty ? (jsonDecode(body)['detail'] ?? body) : 'Delete failed';
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $detail')));
+        }
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
   }
 
   Future<void> _showEditDialog() async {

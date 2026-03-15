@@ -855,7 +855,7 @@ class _MembersTabState extends State<_MembersTab> {
               TextField(
                 controller: _searchController,
                 decoration: InputDecoration(
-                  hintText: 'Search by name…',
+                  hintText: 'Search by name or phone…',
                   prefixIcon: const Icon(Icons.search, size: 20),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -893,7 +893,7 @@ class _MembersTabState extends State<_MembersTab> {
                 child: TextField(
                   controller: _searchController,
                   decoration: InputDecoration(
-                    hintText: 'Search by name…',
+                    hintText: 'Search by name or phone…',
                     prefixIcon: const Icon(Icons.search, size: 20),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

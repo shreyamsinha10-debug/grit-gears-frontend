@@ -70,6 +70,14 @@ class Settings(BaseSettings):
 
     backend_label: str | None = Field(default=None, alias="BACKEND_LABEL")
 
+    # Auto check-out: run job every N seconds (default 3600 = 1 hour). Set higher to reduce load.
+    auto_checkout_interval_seconds: int = Field(
+        default=3600,
+        alias="AUTO_CHECKOUT_INTERVAL_SECONDS",
+        ge=60,
+        description="Interval in seconds for auto check-out job (min 60).",
+    )
+
 
 settings = Settings()
 
