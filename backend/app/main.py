@@ -181,6 +181,21 @@ def version():
     return {"min_app_version": MIN_APP_VERSION, "api_version": "1"}
 
 
+@app.get("/health")
+def health():
+    """Basic health check. Optionally includes email config status (no secrets)."""
+    out = {"status": "ok"}
+    smtp_ok = bool(
+        getattr(settings, "smtp_server", None)
+        and getattr(settings, "smtp_port", None)
+        and getattr(settings, "from_email", None)
+    )
+    out["email_configured"] = smtp_ok
+    if not smtp_ok:
+        out["email_hint"] = "Set SMTP_SERVER, SMTP_PORT, FROM_EMAIL (and optionally SMTP_USERNAME, SMTP_PASSWORD) in Railway variables for forgot-password emails."
+    return out
+
+
 app.include_router(api_router)
 
 __all__ = ["app"]
