@@ -94,20 +94,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     } catch (_) {}
   }
 
-  Widget _defaultLogoWidget() {
+  Widget _defaultLogoWidget({double? size}) {
+    final s = size ?? 32.0;
     return Image.asset(
       defaultLogoAsset,
-      height: 32,
-      width: 32,
+      height: s,
+      width: s,
       fit: BoxFit.contain,
       errorBuilder: (_, __, ___) => Container(
-        width: 32,
-        height: 32,
+        width: s,
+        height: s,
         decoration: BoxDecoration(
           color: AppTheme.primary.withOpacity(0.2),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: const Icon(Icons.fitness_center, color: AppTheme.primary, size: 20),
+        child: Icon(Icons.fitness_center, color: AppTheme.primary, size: s * 0.6),
       ),
     );
   }
@@ -119,6 +120,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ? (profile['name'] as String).trim()
         : defaultGymName;
     final bool hasCustomLogo = profile != null && (profile['logo_base64'] as String?)?.trim().isNotEmpty == true;
+    // Larger logo on narrow (mobile) screens for better visibility.
+    final double logoSize = MediaQuery.sizeOf(context).width < 600 ? 44 : 32;
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -136,14 +139,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                 borderRadius: BorderRadius.circular(8),
                 child: Image.memory(
                   base64Decode(profile['logo_base64'] as String),
-                  height: 32,
-                  width: 32,
+                  height: logoSize,
+                  width: logoSize,
                   fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => _defaultLogoWidget(),
+                  errorBuilder: (_, __, ___) => _defaultLogoWidget(size: logoSize),
                 ),
               )
             else
-              _defaultLogoWidget(),
+              _defaultLogoWidget(size: logoSize),
             const SizedBox(width: 8),
             Flexible(
               child: FittedBox(
@@ -846,6 +849,11 @@ class _MembersTabState extends State<_MembersTab> {
   @override
   Widget build(BuildContext context) {
     final isNarrow = MediaQuery.sizeOf(context).width < 360;
+    // On mobile: larger search icon and padding for better visibility and tap target.
+    final double searchIconSize = isNarrow ? 24 : 20;
+    final EdgeInsets searchPadding = isNarrow
+        ? const EdgeInsets.symmetric(horizontal: 16, vertical: 16)
+        : const EdgeInsets.symmetric(horizontal: 12, vertical: 10);
     return Column(
       children: [
         if (isNarrow)
@@ -854,12 +862,13 @@ class _MembersTabState extends State<_MembersTab> {
             children: [
               TextField(
                 controller: _searchController,
+                style: GoogleFonts.poppins(fontSize: 16),
                 decoration: InputDecoration(
                   hintText: 'Search by name or phone…',
-                  prefixIcon: const Icon(Icons.search, size: 20),
+                  prefixIcon: Icon(Icons.search, size: searchIconSize, color: Colors.grey.shade600),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  isDense: true,
+                  contentPadding: searchPadding,
+                  isDense: false,
                 ),
                 onChanged: (_) => setState(() {}),
               ),
@@ -894,9 +903,9 @@ class _MembersTabState extends State<_MembersTab> {
                   controller: _searchController,
                   decoration: InputDecoration(
                     hintText: 'Search by name or phone…',
-                    prefixIcon: const Icon(Icons.search, size: 20),
+                    prefixIcon: Icon(Icons.search, size: searchIconSize, color: Colors.grey.shade600),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    contentPadding: searchPadding,
                     isDense: true,
                   ),
                   onChanged: (_) => setState(() {}),
