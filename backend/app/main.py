@@ -173,6 +173,12 @@ def root():
     out = {"status": "success", "message": "Gym API is Live!"}
     if getattr(settings, "backend_label", None):
         out["backend"] = settings.backend_label
+    # So Railway can verify SMTP without relying on /health (in case proxy blocks it)
+    out["email_configured"] = bool(
+        getattr(settings, "smtp_server", None)
+        and getattr(settings, "smtp_port", None)
+        and getattr(settings, "from_email", None)
+    )
     return out
 
 
