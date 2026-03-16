@@ -839,6 +839,42 @@ class _MembersTab extends StatefulWidget {
 
 class _MembersTabState extends State<_MembersTab> {
   final _searchController = TextEditingController();
+  List<String> _batchNames = const ['All'];
+  String _selectedBatch = 'All';
+  bool _loadingBatches = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBatches();
+  }
+
+  Future<void> _loadBatches() async {
+    setState(() => _loadingBatches = true);
+    try {
+      final r = await ApiClient.instance.get('/gym/profile', useCache: true);
+      if (r.statusCode >= 200 && r.statusCode < 300) {
+        final data = jsonDecode(r.body) as Map<String, dynamic>;
+        final batchList = data['batches'] as List<dynamic>? ?? [];
+        final names = batchList
+            .map((b) => ((b as Map<String, dynamic>)['name'] as String? ?? '').trim())
+            .where((n) => n.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+        setState(() {
+          _batchNames = ['All', ...names];
+          if (!_batchNames.contains(_selectedBatch)) _selectedBatch = 'All';
+        });
+      } else {
+        setState(() => _loadingBatches = false);
+      }
+    } catch (_) {
+      setState(() => _loadingBatches = false);
+    } finally {
+      if (mounted) setState(() => _loadingBatches = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -848,7 +884,9 @@ class _MembersTabState extends State<_MembersTab> {
 
   @override
   Widget build(BuildContext context) {
-    final isNarrow = MediaQuery.sizeOf(context).width < 360;
+    // Treat phones and medium screens as "narrow" so search + batch filter stack vertically.
+    // This avoids horizontal overflow on tablets / small laptops.
+    final isNarrow = MediaQuery.sizeOf(context).width < 800;
     // On mobile: larger search icon and padding for better visibility and tap target.
     final double searchIconSize = isNarrow ? 24 : 20;
     final EdgeInsets searchPadding = isNarrow
@@ -860,6 +898,27 @@ class _MembersTabState extends State<_MembersTab> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: _selectedBatch,
+                      decoration: const InputDecoration(
+                        labelText: 'Batches',
+                        isDense: false,
+                        border: OutlineInputBorder(),
+                      ),
+                      items: _batchNames
+                          .map((n) => DropdownMenuItem<String>(value: n, child: Text(n)))
+                          .toList(),
+                      onChanged: _loadingBatches
+                          ? null
+                          : (v) => setState(() => _selectedBatch = v ?? 'All'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
               TextField(
                 controller: _searchController,
                 style: GoogleFonts.poppins(fontSize: 16),
@@ -898,6 +957,24 @@ class _MembersTabState extends State<_MembersTab> {
         else
           Row(
             children: [
+              SizedBox(
+                width: 180,
+                child: DropdownButtonFormField<String>(
+                  value: _selectedBatch,
+                  decoration: const InputDecoration(
+                    labelText: 'Batches',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                  items: _batchNames
+                      .map((n) => DropdownMenuItem<String>(value: n, child: Text(n)))
+                      .toList(),
+                  onChanged: _loadingBatches
+                      ? null
+                      : (v) => setState(() => _selectedBatch = v ?? 'All'),
+                ),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: TextField(
                   controller: _searchController,
@@ -939,6 +1016,7 @@ class _MembersTabState extends State<_MembersTab> {
           child: DashboardScreen(
             key: ValueKey(widget.refreshKey),
             isEmbedded: true,
+            batchFilter: _selectedBatch,
             searchQuery: _searchController.text.trim().isEmpty ? null : _searchController.text.trim(),
             onMemberTap: widget.onMemberTap,
           ),

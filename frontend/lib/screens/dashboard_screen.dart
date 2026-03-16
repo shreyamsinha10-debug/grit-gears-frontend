@@ -36,9 +36,17 @@ Widget _memberListAvatar(String memberName) {
 class DashboardScreen extends StatefulWidget {
   final bool isEmbedded;
   final String? searchQuery;
+  /// Optional batch filter (exact match on [Member.batch]); when null or 'All', all batches are shown.
+  final String? batchFilter;
   final void Function(Member member)? onMemberTap;
 
-  const DashboardScreen({super.key, this.isEmbedded = false, this.searchQuery, this.onMemberTap});
+  const DashboardScreen({
+    super.key,
+    this.isEmbedded = false,
+    this.searchQuery,
+    this.batchFilter,
+    this.onMemberTap,
+  });
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -52,8 +60,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   final Set<String> _checkingOutIds = {};
   bool _runningAdminAction = false;
 
-  /// When searchQuery is set, API returns filtered list; otherwise we show loaded _members.
-  List<Member> get _filteredMembers => _members;
+  /// Apply client-side filters (currently batch-only). Search is handled server-side via [searchQuery].
+  List<Member> get _filteredMembers {
+    final batch = widget.batchFilter;
+    if (batch == null || batch.isEmpty || batch == 'All') return _members;
+    return _members.where((m) => m.batch == batch).toList();
+  }
 
   Timer? _searchDebounce;
 
