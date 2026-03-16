@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     smtp_username: str | None = Field(default=None, alias="SMTP_USERNAME")
     smtp_password: str | None = Field(default=None, alias="SMTP_PASSWORD")
     from_email: str | None = Field(default=None, alias="FROM_EMAIL")
+    # SendGrid API key (optional). When set, mail is sent via SendGrid HTTP API instead of SMTP (avoids port blocks in containers).
+    sendgrid_api_key: str | None = Field(default=None, alias="SENDGRID_API_KEY")
 
     # Base URL for password-reset and registration links (where app/web is hosted).
     # No trailing slash. Example: https://gymopshq.web.app or https://yourapp.com

@@ -7,9 +7,12 @@ import time
 from pathlib import Path
 from email.message import EmailMessage
 
+import httpx
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send"
 
 # #region agent log
 def _debug_log(location: str, message: str, data: dict, hypothesis_id: str):
@@ -43,13 +46,45 @@ async def send_email_async(to_addresses: Iterable[str], subject: str, body: str)
     if not recipients:
         logger.warning("Email skipped: no recipients")
         return
-    if not settings.smtp_server or not settings.smtp_port or not settings.from_email:
+    if not settings.from_email:
+        logger.warning(
+            "Email skipped: FROM_EMAIL not set. Set FROM_EMAIL and either SENDGRID_API_KEY or SMTP_* in backend/.env."
+        )
+        return
+
+    # Prefer SendGrid HTTP API when API key is set (avoids SMTP port blocks in containers e.g. Railway).
+    if settings.sendgrid_api_key:
         # #region agent log
-        _debug_log("email.py:send_email_async:skip", "SMTP not configured", {"smtp_server": bool(settings.smtp_server), "smtp_port": bool(settings.smtp_port), "from_email": bool(settings.from_email)}, "D")
+        _debug_log("email.py:send_email_async:attempt", "attempting SendGrid API send", {"to": list(recipients)}, "D")
+        # #endregion
+        payload = {
+            "personalizations": [{"to": [{"email": email} for email in recipients], "subject": subject}],
+            "from": {"email": settings.from_email},
+            "content": [{"type": "text/plain", "value": body}],
+        }
+        try:
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                r = await client.post(
+                    SENDGRID_API_URL,
+                    headers={
+                        "Authorization": f"Bearer {settings.sendgrid_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+            if r.is_success:
+                logger.info("Email sent to %s (subject: %s) via SendGrid API", ", ".join(recipients), subject)
+            else:
+                logger.error("SendGrid API failed to %s: %s %s", ", ".join(recipients), r.status_code, r.text)
+        except Exception as e:
+            logger.exception("Email failed to %s: %s", ", ".join(recipients), e)
+        return
+    if not settings.smtp_server or not settings.smtp_port:
+        # #region agent log
+        _debug_log("email.py:send_email_async:skip", "SMTP not configured", {"smtp_server": bool(settings.smtp_server), "smtp_port": bool(settings.smtp_port)}, "D")
         # #endregion
         logger.warning(
-            "Email skipped: SMTP not configured. Forgot-password and other emails will not be sent. "
-            "Set SMTP_SERVER, SMTP_PORT, and FROM_EMAIL in backend/.env (see .env.example)."
+            "Email skipped: neither SENDGRID_API_KEY nor SMTP configured. Set SENDGRID_API_KEY or SMTP_SERVER/SMTP_PORT and FROM_EMAIL."
         )
         return
 
@@ -62,7 +97,7 @@ async def send_email_async(to_addresses: Iterable[str], subject: str, body: str)
     msg["To"] = ", ".join(recipients)
     msg.set_content(body)
 
-    timeout_sec = 25  # avoid hanging forever if SMTP is unreachable (e.g. Railway → GoDaddy)
+    timeout_sec = 25
 
     def _send():
         if int(settings.smtp_port) == 465:
@@ -80,7 +115,6 @@ async def send_email_async(to_addresses: Iterable[str], subject: str, body: str)
         logger.info("Email sent to %s (subject: %s)", ", ".join(recipients), subject)
     except Exception as e:
         logger.exception("Email failed to %s: %s", ", ".join(recipients), e)
-        # Swallow so API still returns success (don't reveal to client whether email exists)
 
 
 __all__ = ["send_email_async"]
