@@ -12,6 +12,7 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../core/api_client.dart';
 import '../core/date_utils.dart';
@@ -121,13 +122,17 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         : defaultGymName;
     final bool hasCustomLogo = profile != null && (profile['logo_base64'] as String?)?.trim().isNotEmpty == true;
     // Larger logo on narrow (mobile) screens for better visibility.
-    final double logoSize = MediaQuery.sizeOf(context).width < 600 ? 44 : 32;
+    final double logoSize = MediaQuery.sizeOf(context).width < 600 ? 56 : 40;
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        // Back button: go to home (Overview) tab instead of exiting; logout is via dedicated button only.
-        if (_selectedIndex != 0) setState(() => _selectedIndex = 0);
+        // Back button: go to home (Overview) tab first; if already there, close the app instead of navigating to login.
+        if (_selectedIndex != 0) {
+          setState(() => _selectedIndex = 0);
+        } else {
+          SystemNavigator.pop();
+        }
       },
       child: Scaffold(
       appBar: AppBar(
@@ -304,13 +309,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       final label = await exportLocationLabel();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Saved to $label'),
+          content: Text('Saved $filename to $label'),
           duration: const Duration(seconds: 3),
         ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Export failed. Check connection and try again.')),
+        const SnackBar(content: Text('Export failed. Please check your connection and try again.')),
       );
     }
   }

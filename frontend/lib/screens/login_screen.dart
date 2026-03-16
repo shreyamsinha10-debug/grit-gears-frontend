@@ -452,8 +452,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 children: [
                   // Logo with ClipOval to crop to circle so white corners don't show
                   Container(
-                    height: 100,
-                    width: 100,
+                    height: 120,
+                    width: 120,
                     decoration: const BoxDecoration(
                       shape: BoxShape.circle,
                     ),
@@ -525,7 +525,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 keyboardType: TextInputType.emailAddress,
                 maxLength: _emailOrPhoneMaxLength,
                 decoration: InputDecoration(
-                  hintText: 'e.g. 8447594017 or email@example.com',
                   prefixIcon: const Icon(Icons.phone_android_outlined, size: 22),
                   filled: true,
                   fillColor: surface,

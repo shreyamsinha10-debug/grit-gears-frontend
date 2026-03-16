@@ -148,15 +148,31 @@ class _HeatmapScreenState extends State<HeatmapScreen> {
     return Row(
       children: [
         Expanded(
-          child: _SummaryCard(title: 'Today\'s check-ins', value: '$checkIns', icon: FontAwesomeIcons.rightToBracket, color: AppTheme.success),
+          child: _SummaryCard(
+            title: 'Today\'s check-ins',
+            value: '$checkIns',
+            icon: FontAwesomeIcons.rightToBracket,
+            color: AppTheme.success,
+          ),
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: _SummaryCard(title: 'Currently in gym', value: '$currentlyIn', icon: FontAwesomeIcons.peopleGroup, color: Colors.blue),
+          child: _SummaryCard(
+            title: 'Currently in gym',
+            value: '$currentlyIn',
+            icon: FontAwesomeIcons.peopleGroup,
+            color: Colors.blue,
+          ),
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: _SummaryCard(title: 'Avg session', value: avgStr, icon: FontAwesomeIcons.clock, color: AppTheme.primary),
+          child: _SummaryCard(
+            title: 'Avg session',
+            value: avgStr,
+            icon: FontAwesomeIcons.clock,
+            color: AppTheme.primary,
+            compact: true,
+          ),
         ),
       ],
     );
@@ -488,16 +504,26 @@ class _SummaryCard extends StatelessWidget {
   final String value;
   final IconData icon;
   final Color color;
+  final bool compact;
 
-  const _SummaryCard({required this.title, required this.value, required this.icon, required this.color});
+  const _SummaryCard({
+    required this.title,
+    required this.value,
+    required this.icon,
+    required this.color,
+    this.compact = false,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final double valueFontSize = compact ? 15 : 18;
+    final double titleFontSize = compact ? 10 : 11;
+    final EdgeInsets padding = compact ? const EdgeInsets.all(10) : const EdgeInsets.all(12);
     return Card(
       color: AppTheme.surfaceVariant,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: color.withOpacity(0.4))),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: padding,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -505,7 +531,14 @@ class _SummaryCard extends StatelessWidget {
             const SizedBox(height: 8),
             Text(title, style: GoogleFonts.poppins(fontSize: 11, color: Colors.grey.shade600)),
             const SizedBox(height: 2),
-            Text(value, style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.onSurface)),
+            Text(
+              value,
+              style: GoogleFonts.poppins(
+                fontSize: valueFontSize,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.onSurface,
+              ),
+            ),
           ],
         ),
       ),

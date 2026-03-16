@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/services.dart';
 
 import '../core/api_client.dart';
 import '../core/date_utils.dart';
@@ -302,12 +303,23 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
 
     return PopScope(
       canPop: false,
+      onPopInvoked: (didPop) {
+        if (didPop) return;
+        // From member home, hardware back should close the app instead of navigating back to login.
+        SystemNavigator.pop();
+      },
       child: Scaffold(
       backgroundColor: AppTheme.surface,
       appBar: AppBar(
         title: Row(
           children: [
-            Image.asset(defaultLogoAsset, height: 28, width: 28, fit: BoxFit.contain, errorBuilder: (_, __, ___) => const Icon(Icons.fitness_center, color: AppTheme.primary, size: 24)),
+            Image.asset(
+              defaultLogoAsset,
+              height: 36,
+              width: 36,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => const Icon(Icons.fitness_center, color: AppTheme.primary, size: 28),
+            ),
             const SizedBox(width: 8),
             Flexible(
               child: FittedBox(
