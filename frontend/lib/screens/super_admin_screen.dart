@@ -10,6 +10,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter/services.dart';
 
 import '../core/api_client.dart';
 import '../core/secure_storage.dart';
@@ -390,6 +391,11 @@ class _SuperAdminScreenState extends State<SuperAdminScreen> {
 
     return PopScope(
       canPop: false,
+      onPopInvoked: (didPop) {
+        if (didPop) return;
+        // From super admin home, hardware back should close the app instead of navigating back to login.
+        SystemNavigator.pop();
+      },
       child: Scaffold(
       backgroundColor: surface,
       appBar: AppBar(

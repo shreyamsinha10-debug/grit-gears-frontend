@@ -53,11 +53,18 @@ class _BroadcastMessagesScreenState extends State<BroadcastMessagesScreen> {
   Future<void> _loadSent() async {
     setState(() => _loadingSent = true);
     try {
-      final r = await ApiClient.instance.get('/messages', queryParameters: {'include_deleted': 'true'}, useCache: false);
+      final r = await ApiClient.instance.get(
+        '/messages',
+        // Only load active (non-deleted) messages so deleted ones disappear from the list.
+        useCache: false,
+      );
       if (mounted && r.statusCode >= 200 && r.statusCode < 300) {
         final list = jsonDecode(r.body) as List<dynamic>? ?? [];
         setState(() {
-          _sentMessages = list.map((e) => Map<String, dynamic>.from(e as Map<String, dynamic>)).toList();
+          _sentMessages = list
+              .map((e) => Map<String, dynamic>.from(e as Map<String, dynamic>))
+              .where((m) => m['deleted_at'] == null)
+              .toList();
           _loadingSent = false;
         });
       } else {
@@ -496,16 +503,15 @@ class _BroadcastMessagesScreenState extends State<BroadcastMessagesScreen> {
                 )
               else
                 ..._sentMessages.map((msg) {
-                  final deleted = msg['deleted_at'] != null;
                   return Card(
                     margin: const EdgeInsets.only(bottom: 10),
-                    color: deleted ? Colors.grey.shade200 : AppTheme.surfaceVariant,
+                    color: AppTheme.surfaceVariant,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     child: ListTile(
                       contentPadding: EdgeInsets.all(padding),
                       title: Text(
                         msg['title']?.toString() ?? '—',
-                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: deleted ? Colors.grey : AppTheme.onSurface),
+                        style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: AppTheme.onSurface),
                       ),
                       subtitle: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -513,7 +519,7 @@ class _BroadcastMessagesScreenState extends State<BroadcastMessagesScreen> {
                           const SizedBox(height: 4),
                           Text(
                             (msg['body']?.toString() ?? '').length > 80 ? '${(msg['body'] as String).substring(0, 80)}...' : (msg['body']?.toString() ?? ''),
-                            style: GoogleFonts.poppins(fontSize: 13, color: deleted ? Colors.grey : AppTheme.onSurfaceVariant),
+                            style: GoogleFonts.poppins(fontSize: 13, color: AppTheme.onSurfaceVariant),
                           ),
                           const SizedBox(height: 6),
                           Row(
@@ -532,9 +538,7 @@ class _BroadcastMessagesScreenState extends State<BroadcastMessagesScreen> {
                           ),
                         ],
                       ),
-                      trailing: deleted
-                          ? null
-                          : PopupMenuButton<String>(
+                      trailing: PopupMenuButton<String>(
                               onSelected: (v) {
                                 if (v == 'edit') _editMessage(msg);
                                 if (v == 'delete') _deleteMessage(msg);
