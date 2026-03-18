@@ -36,15 +36,17 @@ def _get_check_in_utc(doc: dict) -> datetime | None:
 
 async def run_auto_checkout() -> int:
     """
-    Find today's attendance records that have check-in but no check-out and are older than 2 hours.
+    Find attendance records that have check-in but no check-out and are older than 2 hours.
     Set check_out to check_in + 2 hours (so session duration is exactly 2 hours).
     Returns the number of records updated.
     """
     now_utc = datetime.now(timezone.utc)
     cutoff_utc = now_utc - timedelta(hours=AUTO_CHECKOUT_HOURS)
 
-    # Open check-ins: no check-out set, check-in before cutoff, and today's date (IST)
-    date_ist_str = today_ist().strftime("%Y-%m-%d")
+    # Open check-ins: no check-out set, check-in before cutoff.
+    # NOTE: Do NOT restrict to today's `date_ist`. If a member forgets to check out and
+    # the date rolls over (or if `date_ist` is missing/incorrect in older records),
+    # we still want to close the session after the threshold.
     has_no_checkout = {
         "$or": [
             {"check_out_at_ist": {"$exists": False}},
@@ -52,17 +54,23 @@ async def run_auto_checkout() -> int:
             {"check_out_at_ist": ""},
         ]
     }
-    query = {
-        **has_no_checkout,
-        "date_ist": date_ist_str,
-        "check_in_at_utc": {"$lt": cutoff_utc},
+    # Prefer indexed `check_in_at_utc` cutoff. Also include older/legacy records
+    # that only have `check_in_at_ist` so they can still be closed.
+    check_in_before_cutoff = {
+        "$or": [
+            {"check_in_at_utc": {"$exists": True, "$lt": cutoff_utc}},
+            {"check_in_at_utc": {"$exists": False}, "check_in_at_ist": {"$exists": True, "$ne": ""}},
+        ]
     }
+    query = {"$and": [has_no_checkout, check_in_before_cutoff]}
 
     updated = 0
     cursor = attendance_collection.find(query)
     async for doc in cursor:
         check_in_utc = _get_check_in_utc(doc)
         if check_in_utc is None:
+            continue
+        if check_in_utc >= cutoff_utc:
             continue
         check_out_utc = check_in_utc + timedelta(hours=AUTO_CHECKOUT_HOURS)
         check_out_ist_dt = check_out_utc.astimezone(IST)  # IST for storage, same as check-in/check-out endpoints

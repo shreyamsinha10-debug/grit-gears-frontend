@@ -123,7 +123,7 @@ flutter build apk --release --dart-define=API_BASE_URL=https://YOUR-BACKEND-URL
 
 Examples:
 
-- Railway: `flutter build apk --release --dart-define=API_BASE_URL=https://gymsaas-production.up.railway.app`
+- Railway: `flutter build apk --release --dart-define=API_BASE_URL=https://gymsaas-production-87a0.up.railway.app`
 - Render: `flutter build apk --release --dart-define=API_BASE_URL=https://gymsaas.onrender.com`
 - ngrok: `flutter build apk --release --dart-define=API_BASE_URL=https://abc123.ngrok.io`
 
@@ -133,7 +133,7 @@ The built APK will use this URL for all API calls.
 
 ## Host the web app on Vercel
 
-You can host the **Flutter web app** on Vercel and keep using your **existing backend on Railway** (e.g. `https://gymsaas-production-b4a0.up.railway.app`). The app is already configured to use that URL by default; no backend code change is needed. The backend allows all origins (`allow_origins=["*"]`), so the Vercel domain can call the API.
+You can host the **Flutter web app** on Vercel and keep using your **existing backend on Railway** (e.g. `https://gymsaas-production-87a0.up.railway.app`). The app is already configured to use that URL by default; no backend code change is needed. The backend allows all origins (`allow_origins=["*"]`), so the Vercel domain can call the API.
 
 ### Option A – Vercel builds the app (simplest, but slow first build)
 

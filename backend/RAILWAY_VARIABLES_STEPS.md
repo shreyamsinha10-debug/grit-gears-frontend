@@ -51,7 +51,7 @@ ALLOWED_ORIGINS=*
 ```
 
 **Note:** The old backend used `allow_origins=["*"]`, so `ALLOWED_ORIGINS=*` keeps the same behavior. If you later want to restrict origins, set a comma-separated list, e.g.  
-`ALLOWED_ORIGINS=https://your-frontend.vercel.app,https://gymsaas-production-b4a0.up.railway.app`
+`ALLOWED_ORIGINS=https://your-frontend.vercel.app,https://gymsaas-production-87a0.up.railway.app`
 
 ---
 

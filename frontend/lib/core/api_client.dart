@@ -26,7 +26,7 @@ class ApiClient {
 
   static final ApiClient instance = ApiClient._();
 
-  static const String _defaultBaseUrl = 'https://gymsaas-production-b4a0.up.railway.app';
+  static const String _defaultBaseUrl = 'https://gymsaas-production-87a0.up.railway.app';
   static const String _prefsKey = 'api_base_url';
 
   /// Optional Bearer token for gym_admin / super_admin. When set, all get/post/patch/delete add Authorization header.

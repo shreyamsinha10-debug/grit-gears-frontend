@@ -7,7 +7,7 @@ This document describes how the app works from app open to each user role, so yo
 ## 1. App entry and configuration
 
 - **First screen**: Landing page (home) showing app name, **current backend URL**, "Set server URL" (optional), **Sign In** button, and "Ping server".
-- **Server URL**: Stored in SharedPreferences; default is the production URL (`https://gymsaas-production-b4a0.up.railway.app`). Users can change it (e.g. for local testing).
+- **Server URL**: Stored in SharedPreferences; default is the production URL (`https://gymsaas-production-87a0.up.railway.app`). Users can change it (e.g. for local testing).
 - **Version check**: On load, app calls `GET /version`; if `min_app_version` is higher than the app version, an "Update required" dialog is shown.
 - **Theme**: Light/dark is persisted in secure storage and applied globally.
 - **No auto-login**: The app does not restore a previous session on startup. User always goes Landing → Sign In → Login screen, then routing depends on credentials.
