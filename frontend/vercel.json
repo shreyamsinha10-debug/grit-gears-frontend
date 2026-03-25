@@ -1,9 +1,0 @@
-{
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
-  ],
-  "buildCommand": "bash vercel-build.sh",
-  "installCommand": "true",
-  "outputDirectory": "build/web",
-  "framework": null
-}
