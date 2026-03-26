@@ -114,8 +114,14 @@ class _SignUpScreenState extends State<SignUpScreen> {
       }
     } catch (e) {
       if (!mounted) return;
+      final raw = e.toString();
+      final lower = raw.toLowerCase();
+      final isFetchFailure = lower.contains('failed to fetch') || lower.contains('clientexception');
+      final message = isFetchFailure
+          ? 'Signup could not be submitted from web due to API CORS/network restrictions. Please try mobile app or contact support.'
+          : 'Request failed: ${raw.split('\n').first}';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Request failed: ${e.toString().split('\n').first}')),
+        SnackBar(content: Text(message)),
       );
     } finally {
       if (mounted) setState(() => _submitting = false);
