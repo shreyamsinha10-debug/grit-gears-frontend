@@ -1,5 +1,9 @@
 {
   "rewrites": [
+    {
+      "source": "/api/contact-user-proxy",
+      "destination": "https://www.dertzinfotech.com/api/contact-user"
+    },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "buildCommand": "bash vercel-build.sh",
