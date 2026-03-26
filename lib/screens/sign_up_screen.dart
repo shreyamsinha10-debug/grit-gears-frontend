@@ -127,6 +127,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     final radius = 14.0;
 
     return Scaffold(
+      backgroundColor: const Color(0xFFF7F8FC),
       appBar: AppBar(
         title: Text(
           'Sign Up',
@@ -136,96 +137,114 @@ class _SignUpScreenState extends State<SignUpScreen> {
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Create your account request',
-                  style: GoogleFonts.poppins(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    color: onSurface,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Fill in your details. We will contact you shortly.',
-                  style: GoogleFonts.poppins(fontSize: 14, color: onSurface.withOpacity(0.7)),
-                ),
-                const SizedBox(height: 24),
-                TextFormField(
-                  controller: _firstNameController,
-                  textInputAction: TextInputAction.next,
-                  decoration: _inputDecoration('First Name'),
-                  validator: (v) => _validateName(v, 'First name'),
-                ),
-                const SizedBox(height: 14),
-                TextFormField(
-                  controller: _lastNameController,
-                  textInputAction: TextInputAction.next,
-                  decoration: _inputDecoration('Last Name'),
-                  validator: (v) => _validateName(v, 'Last name'),
-                ),
-                const SizedBox(height: 14),
-                Row(
+          child: Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+              side: BorderSide(color: Colors.grey.shade200),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      flex: 2,
-                      child: TextFormField(
-                        controller: _countryCodeController,
-                        textInputAction: TextInputAction.next,
-                        keyboardType: TextInputType.phone,
-                        decoration: _inputDecoration('Country Ext.'),
-                        validator: _validateCountryCode,
+                    Text(
+                      'Create your account request',
+                      style: GoogleFonts.poppins(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: onSurface,
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      flex: 5,
-                      child: TextFormField(
-                        controller: _phoneController,
-                        textInputAction: TextInputAction.next,
-                        keyboardType: TextInputType.phone,
-                        decoration: _inputDecoration('Phone Number'),
-                        validator: _validatePhone,
+                    const SizedBox(height: 8),
+                    Text(
+                      'Fill in your details. We will contact you shortly.',
+                      style: GoogleFonts.poppins(fontSize: 14, color: onSurface.withOpacity(0.7)),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _firstNameController,
+                            textInputAction: TextInputAction.next,
+                            decoration: _inputDecoration('First Name'),
+                            validator: (v) => _validateName(v, 'First name'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _lastNameController,
+                            textInputAction: TextInputAction.next,
+                            decoration: _inputDecoration('Last Name'),
+                            validator: (v) => _validateName(v, 'Last name'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 1,
+                          child: TextFormField(
+                            controller: _countryCodeController,
+                            textInputAction: TextInputAction.next,
+                            keyboardType: TextInputType.phone,
+                            decoration: _inputDecoration('Code'),
+                            validator: _validateCountryCode,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          flex: 4,
+                          child: TextFormField(
+                            controller: _phoneController,
+                            textInputAction: TextInputAction.next,
+                            keyboardType: TextInputType.phone,
+                            decoration: _inputDecoration('Phone Number'),
+                            validator: _validatePhone,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      controller: _emailController,
+                      textInputAction: TextInputAction.done,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: _inputDecoration('Email ID'),
+                      validator: _validateEmail,
+                    ),
+                    const SizedBox(height: 24),
+                    FilledButton(
+                      onPressed: _submitting ? null : _submit,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: AppTheme.onPrimary,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius)),
                       ),
+                      child: _submitting
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppTheme.onPrimary,
+                              ),
+                            )
+                          : Text(
+                              'Submit',
+                              style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                            ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 14),
-                TextFormField(
-                  controller: _emailController,
-                  textInputAction: TextInputAction.done,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: _inputDecoration('Email ID'),
-                  validator: _validateEmail,
-                ),
-                const SizedBox(height: 24),
-                FilledButton(
-                  onPressed: _submitting ? null : _submit,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: AppTheme.onPrimary,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius)),
-                  ),
-                  child: _submitting
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: AppTheme.onPrimary,
-                          ),
-                        )
-                      : Text(
-                          'Submit',
-                          style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
-                        ),
-                ),
-              ],
+              ),
             ),
           ),
         ),
@@ -237,7 +256,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     return InputDecoration(
       labelText: label,
       filled: true,
-      fillColor: Colors.white,
+      fillColor: const Color(0xFFFCFCFF),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
