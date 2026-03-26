@@ -15,7 +15,6 @@ class SignUpScreen extends StatefulWidget {
 }
 
 class _SignUpScreenState extends State<SignUpScreen> {
-  static const String _recipientEmail = 'contact@dertzinfotech.com';
   static const String _contactUsUrl = String.fromEnvironment(
     'SIGNUP_PROXY_URL',
     defaultValue: '/api/contact-user-proxy',
@@ -84,7 +83,6 @@ class _SignUpScreenState extends State<SignUpScreen> {
     final userEmail = _emailController.text.trim();
     final fullName = '$firstName $lastName'.trim();
     final contact = '${countryCode.replaceAll('+', '')}$phoneDigits';
-    final hiddenMessage = 'GymOpsHQ | UserEmail: $userEmail | UserPhone: $contact';
 
     setState(() => _submitting = true);
     try {
@@ -94,10 +92,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
             headers: const {'Content-Type': 'application/json'},
             body: jsonEncode({
               'name': fullName,
-              'email': _recipientEmail,
+              'email': userEmail,
               'contact': contact,
               'company': 'NA',
-              'message': hiddenMessage,
+              'message': 'GymOpsHQ',
             }),
           )
           .timeout(const Duration(seconds: 25));
