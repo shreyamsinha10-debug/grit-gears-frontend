@@ -14,7 +14,7 @@ class SignUpScreen extends StatefulWidget {
 }
 
 class _SignUpScreenState extends State<SignUpScreen> {
-  static const String _contactUsUrl = 'http://app.spectrabms:8080/api/v1/auth/contactUs';
+  static const String _contactUsUrl = 'https://www.dertzinfotech.com/api/contact-user';
 
   final _formKey = GlobalKey<FormState>();
   final _firstNameController = TextEditingController();
@@ -62,7 +62,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
   String? _validateEmail(String? value) {
     final v = (value ?? '').trim();
-    if (v.isEmpty) return null;
+    if (v.isEmpty) return 'Email is required';
     final valid = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(v);
     if (!valid) return 'Enter a valid email';
     return null;
@@ -78,8 +78,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
     final phoneDigits = _phoneController.text.replaceAll(RegExp(r'[^0-9]'), '');
     final email = _emailController.text.trim();
     final fullName = '$firstName $lastName'.trim();
-    final mobileWithCode = '$countryCode $phoneDigits';
-    final mobEmail = email.isNotEmpty ? '$mobileWithCode | $email' : mobileWithCode;
+    final contact = '${countryCode.replaceAll('+', '')}$phoneDigits';
 
     setState(() => _submitting = true);
     try {
@@ -89,8 +88,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
             headers: const {'Content-Type': 'application/json'},
             body: jsonEncode({
               'name': fullName,
-              'mob_email': mobEmail,
-              'remarks': 'NA',
+              'email': email,
+              'contact': contact,
+              'company': 'NA',
+              'message': 'NA',
             }),
           )
           .timeout(const Duration(seconds: 25));
