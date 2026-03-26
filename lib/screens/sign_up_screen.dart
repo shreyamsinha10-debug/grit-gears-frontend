@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 
@@ -58,8 +59,8 @@ class _SignUpScreenState extends State<SignUpScreen> {
   String? _validatePhone(String? value) {
     final digits = (value ?? '').replaceAll(RegExp(r'[^0-9]'), '');
     if (digits.isEmpty) return 'Phone number is required';
-    if (digits.length < 6 || digits.length > 15) {
-      return 'Phone number must be 6-15 digits';
+    if (digits.length != 10) {
+      return 'Phone number must be exactly 10 digits';
     }
     return null;
   }
@@ -217,6 +218,10 @@ class _SignUpScreenState extends State<SignUpScreen> {
                             controller: _phoneController,
                             textInputAction: TextInputAction.next,
                             keyboardType: TextInputType.phone,
+                            inputFormatters: const [
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(10),
+                            ],
                             decoration: _inputDecoration('Phone Number'),
                             validator: _validatePhone,
                           ),
