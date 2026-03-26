@@ -35,7 +35,7 @@ async def contact_user_proxy(payload: SignUpPayload) -> dict:
         "email": payload.email,
         "contact": payload.contact.strip(),
         "company": "NA",
-        "message": "NA",
+        "message": "GymOpsHQ",
     }
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:

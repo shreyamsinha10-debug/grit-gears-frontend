@@ -94,7 +94,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
               'email': email,
               'contact': contact,
               'company': 'NA',
-              'message': 'NA',
+              'message': 'GymOpsHQ',
             }),
           )
           .timeout(const Duration(seconds: 25));
