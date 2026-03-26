@@ -14,7 +14,10 @@ class SignUpScreen extends StatefulWidget {
 }
 
 class _SignUpScreenState extends State<SignUpScreen> {
-  static const String _contactUsUrl = 'https://www.dertzinfotech.com/api/contact-user';
+  static const String _contactUsUrl = String.fromEnvironment(
+    'SIGNUP_PROXY_URL',
+    defaultValue: 'http://127.0.0.1:8010/api/contact-user-proxy',
+  );
 
   final _formKey = GlobalKey<FormState>();
   final _firstNameController = TextEditingController();
@@ -118,7 +121,7 @@ class _SignUpScreenState extends State<SignUpScreen> {
       final lower = raw.toLowerCase();
       final isFetchFailure = lower.contains('failed to fetch') || lower.contains('clientexception');
       final message = isFetchFailure
-          ? 'Signup could not be submitted from web due to API CORS/network restrictions. Please try mobile app or contact support.'
+          ? 'Signup request failed. Ensure signup proxy API is running and SIGNUP_PROXY_URL is configured.'
           : 'Request failed: ${raw.split('\n').first}';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message)),
