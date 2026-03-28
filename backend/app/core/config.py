@@ -80,6 +80,13 @@ class Settings(BaseSettings):
         description="Interval in seconds for auto check-out job (min 60).",
     )
 
+    monthly_due_renewal_interval_seconds: int = Field(
+        default=3600,
+        alias="MONTHLY_DUE_RENEWAL_INTERVAL_SECONDS",
+        ge=60,
+        description="Interval for scanning expired invoice periods and inserting new monthly Due rows.",
+    )
+
 
 settings = Settings()
 

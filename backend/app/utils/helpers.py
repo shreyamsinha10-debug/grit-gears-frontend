@@ -101,6 +101,7 @@ async def doc_to_member_response(
         photo_base64=photo_base64 if include_photo else None,
         id_document_base64=id_document_base64 if include_id_doc else None,
         id_document_type=id_document_type if include_id_doc else None,
+        plan_id=doc.get("plan_id"),
         today_status=today_status,
     )
 

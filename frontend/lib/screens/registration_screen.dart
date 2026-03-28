@@ -1,9 +1,8 @@
 // ---------------------------------------------------------------------------
 // Registration – new member sign-up: form, photo, ID document, POST /members.
 // ---------------------------------------------------------------------------
-// Admin-only. Collects name, phone, email, membership type, batch, optional
-// workout schedule, diet chart, photo (base64), ID document (base64). On submit
-// calls backend /members and shows success or error.
+// Admin-only. Collects name, phone, email, membership type, batch, required
+// membership plan (from gym settings), optional photo / ID. On submit calls POST /members.
 // ---------------------------------------------------------------------------
 
 import 'dart:convert';
@@ -19,6 +18,7 @@ import '../core/api_client.dart';
 import '../core/date_utils.dart';
 import '../core/image_compression.dart';
 import '../theme/app_theme.dart';
+import 'gym_settings_screen.dart';
 import 'login_screen.dart';
 
 class RegistrationScreen extends StatefulWidget {
@@ -36,7 +36,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   final _addressController = TextEditingController();
 
   String _membershipType = 'Regular';
-  /// When user selects a membership plan from gym settings, this is the plan id; otherwise null (legacy Regular/PT).
+  /// Required: plan id from gym settings (must match an active plan).
   String? _selectedPlanId;
   String _batch = 'Morning';
   List<Map<String, dynamic>> _plans = [];
@@ -95,6 +95,12 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
             _batch = _batches.first['name'] as String;
           } else if (_batches.isEmpty) {
             _batch = 'Morning'; // Fallback if no batches exist
+          }
+          final planIds = _plans.map((p) => p['id'] as String? ?? '').where((s) => s.isNotEmpty).toList();
+          if (planIds.isEmpty) {
+            _selectedPlanId = null;
+          } else if (_selectedPlanId == null || !planIds.contains(_selectedPlanId)) {
+            _selectedPlanId = planIds.first;
           }
         });
       } else {
@@ -181,6 +187,21 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate() || _isSubmitting) return;
+    if (_plans.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Create at least one membership plan in Gym settings before registering a member.'),
+        ),
+      );
+      return;
+    }
+    final planId = _selectedPlanId?.trim();
+    if (planId == null || planId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select a membership plan.')),
+      );
+      return;
+    }
 
     setState(() => _isSubmitting = true);
 
@@ -192,8 +213,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         'membership_type': _membershipType,
         'batch': _batch,
         'status': 'Active',
+        'plan_id': planId,
       };
-      if (_selectedPlanId != null && _selectedPlanId!.isNotEmpty) body['plan_id'] = _selectedPlanId;
       final address = _addressController.text.trim();
       if (address.isNotEmpty) body['address'] = address;
       if (_dateOfBirth != null) body['date_of_birth'] = formatApiDate(_dateOfBirth!);
@@ -219,7 +240,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         _emailController.clear();
         setState(() {
           _membershipType = 'Regular';
-          _selectedPlanId = null;
+          _selectedPlanId = _plans.isNotEmpty ? (_plans.first['id'] as String?) : null;
           _batch = _batches.isNotEmpty ? (_batches.first['name'] as String) : 'Morning';
           _dateOfBirth = null;
           _addressController.clear();
@@ -407,14 +428,52 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                     onChanged: (v) => setState(() => _membershipType = v ?? 'Regular'),
                   ),
                   const SizedBox(height: 20),
-                  DropdownButtonFormField<String>(
-                    value: _selectedPlanId,
-                    decoration: _inputDecoration('Membership plan (optional)', null),
-                    dropdownColor: AppTheme.surfaceVariant,
-                    style: GoogleFonts.poppins(color: AppTheme.onSurface, fontSize: 16),
-                    items: [
-                      const DropdownMenuItem(value: null, child: Text('No plan — use Training type for billing')),
-                      ..._plans.map((p) {
+                  if (_plans.isEmpty) ...[
+                    Material(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.info_outline, color: Colors.orange.shade800, size: 22),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    'No membership plans yet. Add plans in Gym settings (e.g. monthly fee, duration), then return here to register members.',
+                                    style: GoogleFonts.poppins(fontSize: 14, color: AppTheme.onSurface),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                await Navigator.push<void>(
+                                  context,
+                                  MaterialPageRoute<void>(builder: (_) => const GymSettingsScreen()),
+                                );
+                                if (mounted) await _loadPlans();
+                              },
+                              icon: const Icon(Icons.settings, size: 20),
+                              label: const Text('Open Gym settings'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ] else
+                    DropdownButtonFormField<String>(
+                      value: (_selectedPlanId != null && _plans.any((p) => p['id'] == _selectedPlanId))
+                          ? _selectedPlanId
+                          : (_plans.isNotEmpty ? _plans.first['id'] as String? : null),
+                      decoration: _inputDecoration('Membership plan *', null),
+                      dropdownColor: AppTheme.surfaceVariant,
+                      style: GoogleFonts.poppins(color: AppTheme.onSurface, fontSize: 16),
+                      items: _plans.map((p) {
                         final id = p['id'] as String? ?? '';
                         final name = p['name'] as String? ?? '';
                         final price = p['price'] as int? ?? 0;
@@ -423,10 +482,9 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                           value: id,
                           child: Text('$name - ₹$price/$dur', style: GoogleFonts.poppins(color: AppTheme.onSurface)),
                         );
-                      }),
-                    ],
-                    onChanged: (v) => setState(() => _selectedPlanId = v),
-                  ),
+                      }).toList(),
+                      onChanged: (v) => setState(() => _selectedPlanId = v),
+                    ),
                   const SizedBox(height: 20),
                   DropdownButtonFormField<String>(
                     value: _batches.isEmpty
@@ -508,7 +566,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
             Tooltip(
               message: 'Register new member',
               child: FilledButton.icon(
-                onPressed: _isSubmitting ? null : _submit,
+                onPressed: (_isSubmitting || _plans.isEmpty) ? null : _submit,
               icon: _isSubmitting
                   ? const SizedBox(
                       width: 20,

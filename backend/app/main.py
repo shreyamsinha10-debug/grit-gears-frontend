@@ -27,6 +27,7 @@ from app.db.database import (
 )
 from app.db.indexes import ensure_indexes
 from app.tasks.attendance_tasks import run_auto_checkout
+from app.tasks.monthly_dues_tasks import run_monthly_due_renewal
 from app.utils.time_utils import today_ist
 
 MIN_APP_VERSION = "1.0.0"
@@ -102,6 +103,7 @@ async def lifespan(app: FastAPI):
 
     # Run auto check-out once at startup (then every interval)
     await run_auto_checkout()
+    await run_monthly_due_renewal()
 
     interval = settings.auto_checkout_interval_seconds
 
@@ -115,13 +117,31 @@ async def lifespan(app: FastAPI):
             except Exception:
                 pass  # Log and continue next interval
 
+    renew_interval = settings.monthly_due_renewal_interval_seconds
+
+    async def monthly_due_renewal_loop() -> None:
+        while True:
+            await asyncio.sleep(renew_interval)
+            try:
+                await run_monthly_due_renewal()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                pass
+
     auto_checkout_task = asyncio.create_task(auto_checkout_loop())
+    monthly_due_task = asyncio.create_task(monthly_due_renewal_loop())
     try:
         yield
     finally:
         auto_checkout_task.cancel()
+        monthly_due_task.cancel()
         try:
             await auto_checkout_task
+        except asyncio.CancelledError:
+            pass
+        try:
+            await monthly_due_task
         except asyncio.CancelledError:
             pass
 

@@ -70,6 +70,21 @@ async def client():
         base_url="http://test",
         headers={"Authorization": f"Bearer {gym_token}"},
     ) as ac:
+        r_plan = await ac.patch(
+            "/gym/profile",
+            json={
+                "plans": [
+                    {
+                        "id": "e2e-plan-monthly",
+                        "name": "E2E Monthly",
+                        "price": 500,
+                        "duration_type": "1m",
+                        "is_active": True,
+                    }
+                ]
+            },
+        )
+        assert r_plan.status_code == 200, r_plan.text
         yield ac
 
 
@@ -96,6 +111,7 @@ async def test_member_crud_and_by_phone(client: AsyncClient):
         "email": "e2e@example.com",
         "membership_type": "Regular",
         "batch": "Morning",
+        "plan_id": "e2e-plan-monthly",
     }
     r = await client.post("/members", json=payload)
     assert r.status_code == 200, r.text
@@ -130,6 +146,7 @@ async def test_attendance_check_in_check_out(client: AsyncClient):
         "email": "att@example.com",
         "membership_type": "Regular",
         "batch": "Evening",
+        "plan_id": "e2e-plan-monthly",
     }
     r = await client.post("/members", json=payload)
     assert r.status_code == 200, r.text
@@ -166,6 +183,7 @@ async def test_auto_checkout_after_2_hours(client: AsyncClient):
         "email": "autoco@example.com",
         "membership_type": "Regular",
         "batch": "Morning",
+        "plan_id": "e2e-plan-monthly",
     }
     r = await client.post("/members", json=payload)
     assert r.status_code == 200, r.text
@@ -201,6 +219,7 @@ async def test_payments_and_log_monthly(client: AsyncClient):
         "email": "pay@example.com",
         "membership_type": "Regular",
         "batch": "Morning",
+        "plan_id": "e2e-plan-monthly",
     }
     r = await client.post("/members", json=payload)
     assert r.status_code == 200, r.text
@@ -211,6 +230,7 @@ async def test_payments_and_log_monthly(client: AsyncClient):
     payments = r_list.json()
     assert isinstance(payments, list)
     assert len(payments) >= 1
+    assert any(p.get("status") == "Due" for p in payments), "New member should have pending monthly Due for dashboard"
 
     from datetime import date
     period = date.today().strftime("%Y-%m")
@@ -223,6 +243,10 @@ async def test_payments_and_log_monthly(client: AsyncClient):
     assert log_data["status"] == "Paid"
     assert log_data["amount"] == 500
     assert log_data["period"] == period
+
+    r_list2 = await client.get("/payments", params={"member_id": member_id})
+    assert r_list2.status_code == 200
+    assert any((p.get("status") == "Paid" and p.get("amount") == 500) for p in r_list2.json())
 
     r_sum = await client.get("/payments/fees-summary")
     assert r_sum.status_code == 200

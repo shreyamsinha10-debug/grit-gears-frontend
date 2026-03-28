@@ -19,6 +19,7 @@ from app.models.schemas import (
 )
 from app.utils.helpers import gym_filter, resolve_monthly_fee
 from app.utils.notifications import send_notification
+from app.utils.payment_settlement import apply_collection_to_due_payments
 from app.utils.time_utils import today_ist
 
 router = APIRouter()
@@ -129,26 +130,7 @@ async def billing_create(body: CreateBillRequest, gym_id: str = Depends(get_gym_
             "period": None, "status": "Paid", "due_date": pay_dt, "paid_at": pay_dt, "created_at": datetime.now(timezone.utc),
             "gym_id": gym_id, "invoice_id": inv_id_str,
         })
-    member_id = body.member_id
-    inv_total = body.total
-    if member_id and inv_total > 0:
-        pay_q = {"member_id": member_id, "status": {"$in": ["Due", "Overdue"]}}
-        pay_q.update(gym_filter(gym_id))
-        cursor = payments_collection.find(pay_q).sort("created_at", 1)
-        remaining = inv_total
-        ids_to_mark = []
-        async for p in cursor:
-            if remaining <= 0:
-                break
-            amt = p.get("amount") or 0
-            if amt <= remaining:
-                ids_to_mark.append(p["_id"])
-                remaining -= amt
-        if ids_to_mark:
-            await payments_collection.update_many(
-                {"_id": {"$in": ids_to_mark}, **gym_filter(gym_id)},
-                {"$set": {"status": "Paid", "paid_at": pay_dt, "invoice_id": inv_id_str}},
-            )
+    await apply_collection_to_due_payments(body.member_id, gym_id, body.total)
     return _invoice_doc_to_response({**inv_doc, "_id": inv_result.inserted_id})
 
 
@@ -172,8 +154,9 @@ async def billing_issue(body: BillingIssueWalkIn, gym_id: str = Depends(get_gym_
     items = [{"description": "First Month", "amount": monthly_amount}]
     inv_doc = {"member_id": mid, "member_name": body.name, "items": items, "total": monthly_amount, "status": "Unpaid", "issued_at": datetime.now(timezone.utc), "paid_at": None, "gym_id": gym_id}
     inv_result = await invoices_collection.insert_one(inv_doc)
-    due_dt = datetime(today_ist().year, today_ist().month, today_ist().day, tzinfo=timezone.utc)
-    period = today_ist().strftime("%Y-%m")
+    t = today_ist()
+    due_dt = datetime(t.year, t.month, t.day, tzinfo=timezone.utc)
+    period = t.strftime("%Y-%m")
     await payments_collection.insert_many([{"member_id": mid, "member_name": body.name, "amount": monthly_amount, "fee_type": "monthly", "period": period, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id}])
     send_notification("registration", {"name": body.name, "phone": body.phone, "email": body.email})
     return InvoiceResponse(id=str(inv_result.inserted_id), member_id=mid, member_name=body.name, items=items, total=monthly_amount, status="Unpaid", issued_at=inv_doc["issued_at"], paid_at=None, bill_number=None)
@@ -232,22 +215,8 @@ async def billing_pay(invoice_id: str, background_tasks: BackgroundTasks, gym_id
     member_name = doc.get("member_name", "")
     for it in doc.get("items", []):
         await payments_collection.insert_one({"member_id": member_id, "member_name": member_name, "amount": it.get("amount", 0), "fee_type": it.get("description", "Payment"), "period": None, "status": "Paid", "due_date": now, "paid_at": now, "created_at": now, "gym_id": gym_id, "invoice_id": str(doc["_id"])})
-    inv_total = doc.get("total") or 0
-    if member_id and inv_total > 0:
-        pay_q = {"member_id": member_id, "status": {"$in": ["Due", "Overdue"]}}
-        pay_q.update(gym_filter(gym_id))
-        cursor = payments_collection.find(pay_q).sort("created_at", 1)
-        remaining = inv_total
-        ids_to_mark = []
-        async for p in cursor:
-            if remaining <= 0:
-                break
-            amt = p.get("amount") or 0
-            if amt <= remaining:
-                ids_to_mark.append(p["_id"])
-                remaining -= amt
-        if ids_to_mark:
-            await payments_collection.update_many({"_id": {"$in": ids_to_mark}, **gym_filter(gym_id)}, {"$set": {"status": "Paid", "paid_at": now}})
+    inv_total = int(doc.get("total") or 0)
+    await apply_collection_to_due_payments(member_id, gym_id, inv_total)
     member_q = {"_id": ObjectId(member_id)}
     member_q.update(gym_filter(gym_id))
     member = await members_collection.find_one(member_q)

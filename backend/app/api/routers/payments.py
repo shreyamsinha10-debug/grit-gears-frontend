@@ -2,6 +2,7 @@
 Payments router: list, members-with-due, fees-summary, log-monthly, PATCH, pay.
 """
 
+from calendar import monthrange
 from datetime import datetime, timezone
 
 from bson import ObjectId
@@ -15,8 +16,9 @@ from app.core.security import _pwd_fallback, pwd_context
 from app.db.database import members_collection, payments_collection
 from app.models.schemas import LogMonthlyPaymentBody, PaymentResponse, PaymentStatusUpdate
 from app.utils.helpers import gym_filter, to_date
+from app.utils.payment_settlement import apply_collection_to_due_payments
 from app.utils.notifications import send_notification
-from app.utils.time_utils import today_ist
+from app.utils.time_utils import IST, today_ist
 
 router = APIRouter()
 
@@ -179,7 +181,17 @@ async def log_monthly_payment(body: LogMonthlyPaymentBody, gym_id: str = Depends
         "paid_at": pay_date,
         "gym_id": gym_id,
     }
+    try:
+        py, pm = body.period.split("-")
+        y, mnum = int(py), int(pm)
+        last_d = monthrange(y, mnum)[1]
+        period_end_ist = datetime(y, mnum, last_d, 23, 59, 59, tzinfo=IST)
+        inv_doc["end_date"] = period_end_ist.astimezone(timezone.utc)
+    except (ValueError, AttributeError):
+        pass
     await invoices_collection.insert_one(inv_doc)
+
+    await apply_collection_to_due_payments(body.member_id, gym_id, body.amount)
 
     return PaymentResponse(
         id=str(doc["_id"]),

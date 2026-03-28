@@ -44,7 +44,6 @@ async def create_member(member: MemberCreate, gym_id: str = Depends(get_gym_admi
     photo_base64 = doc.pop("photo_base64", None)
     id_document_base64 = doc.pop("id_document_base64", None)
     doc["gym_id"] = gym_id
-    doc.pop("plan_id", None)
     if doc.get("date_of_birth") is not None:
         doc["date_of_birth"] = datetime.combine(doc["date_of_birth"], datetime.min.time())
     doc["phone"] = normalize_phone(doc.get("phone") or "")
@@ -58,20 +57,29 @@ async def create_member(member: MemberCreate, gym_id: str = Depends(get_gym_admi
         )
     doc["created_at"] = datetime.now(timezone.utc)
     mt = doc["membership_type"].value if isinstance(doc["membership_type"], MembershipType) else doc["membership_type"]
+    pid = str(member.plan_id).strip()
+    if not pid:
+        raise HTTPException(
+            status_code=400,
+            detail="Membership plan is required. Create at least one plan under Gym settings, then select it when registering a member.",
+        )
+    gym = await gyms_collection.find_one({"_id": ObjectId(gym_id)})
+    if not gym:
+        raise HTTPException(status_code=404, detail="Gym not found")
+    plans_list = gym.get("plans") or []
     plan = None
-    if member.plan_id and (member.plan_id or "").strip():
-        gym = await gyms_collection.find_one({"_id": ObjectId(gym_id)})
-        if not gym:
-            raise HTTPException(status_code=404, detail="Gym not found")
-        plans_list = gym.get("plans") or []
-        for p in plans_list:
-            if isinstance(p, dict) and str(p.get("id", "")) == str(member.plan_id).strip():
-                if not p.get("is_active", True):
-                    raise HTTPException(status_code=400, detail="Selected plan is deactivated")
-                plan = p
-                break
-        if not plan:
-            raise HTTPException(status_code=400, detail="Membership plan not found")
+    for p in plans_list:
+        if isinstance(p, dict) and str(p.get("id", "")) == pid:
+            if not p.get("is_active", True):
+                raise HTTPException(status_code=400, detail="Selected plan is deactivated")
+            plan = p
+            break
+    if not plan:
+        raise HTTPException(
+            status_code=400,
+            detail="Membership plan not found. Create or restore the plan in Gym settings, or pick an active plan from the list.",
+        )
+    doc["plan_id"] = pid
     doc["workout_schedule"] = doc.get("workout_schedule")
     doc["diet_chart"] = doc.get("diet_chart")
     try:
@@ -102,33 +110,16 @@ async def create_member(member: MemberCreate, gym_id: str = Depends(get_gym_admi
     today = today_ist()
     due_dt = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
     period = today.strftime("%Y-%m")
-    if plan:
-        plan_price = int(plan.get("price", 0))
-        payments_to_insert = []
-        if plan.get("duration_type") == "one_time":
-            if plan_price > 0:
-                payments_to_insert.append({"member_id": mid, "member_name": doc["name"], "amount": plan_price, "fee_type": "monthly", "period": period, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id})
-        else:
-            if plan_price > 0:
-                payments_to_insert.append({"member_id": mid, "member_name": doc["name"], "amount": plan_price, "fee_type": "monthly", "period": period, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id})
-        if payments_to_insert:
-            await payments_collection.insert_many(payments_to_insert)
+    plan_price = int(plan.get("price", 0))
+    payments_to_insert = []
+    if plan.get("duration_type") == "one_time":
+        if plan_price > 0:
+            payments_to_insert.append({"member_id": mid, "member_name": doc["name"], "amount": plan_price, "fee_type": "monthly", "period": period, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id})
     else:
-        monthly_amount = await resolve_monthly_fee(gym_id, mt)
-        await payments_collection.insert_many([
-            {
-                "member_id": mid,
-                "member_name": doc["name"],
-                "amount": monthly_amount,
-                "fee_type": "monthly",
-                "period": period,
-                "status": "Due",
-                "due_date": due_dt,
-                "paid_at": None,
-                "created_at": datetime.now(timezone.utc),
-                "gym_id": gym_id,
-            },
-        ])
+        if plan_price > 0:
+            payments_to_insert.append({"member_id": mid, "member_name": doc["name"], "amount": plan_price, "fee_type": "monthly", "period": period, "status": "Due", "due_date": due_dt, "paid_at": None, "created_at": datetime.now(timezone.utc), "gym_id": gym_id})
+    if payments_to_insert:
+        await payments_collection.insert_many(payments_to_insert)
     send_notification("registration", {"name": doc["name"], "phone": doc["phone"], "email": doc["email"]})
 
     return MemberResponse(
@@ -149,6 +140,7 @@ async def create_member(member: MemberCreate, gym_id: str = Depends(get_gym_admi
         photo_base64=photo_base64,
         id_document_base64=id_document_base64,
         id_document_type=doc.get("id_document_type"),
+        plan_id=doc.get("plan_id"),
     )
 
 

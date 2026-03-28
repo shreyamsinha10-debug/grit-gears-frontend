@@ -46,6 +46,7 @@ class MemberResponse(BaseModel):
     photo_base64: str | None = None
     id_document_base64: str | None = None
     id_document_type: str | None = None
+    plan_id: str | None = None
     today_status: TodayAttendance | None = None
 
 
@@ -76,7 +77,7 @@ class MemberCreate(BaseModel):
     photo_base64: str | None = None
     id_document_base64: str | None = None
     id_document_type: str | None = None
-    plan_id: str | None = None
+    plan_id: str = Field(..., min_length=1, description="Active membership plan id from gym settings")
 
 
 class MemberPTUpdate(BaseModel):
