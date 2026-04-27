@@ -103,6 +103,11 @@ class MemberResetPasswordBody(BaseModel):
     new_password: str = Field(..., min_length=6)
 
 
+class MemberDeviceTokenUpsert(BaseModel):
+    token: str = Field(..., min_length=16, max_length=4096)
+    platform: str | None = Field(default=None, max_length=30)
+
+
 class PhotoUpdate(BaseModel):
     photo_base64: str | None = None
 
@@ -406,6 +411,7 @@ __all__ = [
     "MemberPTUpdate",
     "MemberUpdate",
     "MemberResetPasswordBody",
+    "MemberDeviceTokenUpsert",
     "PhotoUpdate",
     "IdDocumentUpdate",
     "MessageCreate",

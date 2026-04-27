@@ -18,6 +18,7 @@ import 'package:flutter/services.dart';
 import '../core/api_client.dart';
 import '../core/date_utils.dart';
 import '../core/image_compression.dart';
+import '../core/push_notifications.dart';
 import '../core/secure_storage.dart';
 import '../models/models.dart';
 import '../widgets/skeleton_loading.dart';
@@ -55,6 +56,7 @@ class _MemberHomeScreenState extends State<MemberHomeScreen> {
     super.initState();
     _checkedInToday = widget.member.isCheckedInToday ?? false;
     _checkedOutToday = widget.member.isCheckedOutToday ?? false;
+    PushNotifications.initForMember(widget.member.id);
     _loadPayments();
     _loadFullMember();
     _loadStats();

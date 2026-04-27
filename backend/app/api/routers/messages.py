@@ -9,9 +9,10 @@ from bson.errors import InvalidId
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.auth import get_gym_admin, get_gym_id_and_member_for_messages
-from app.db.database import messages_collection
+from app.db.database import members_collection, messages_collection
 from app.models.schemas import MessageCreate, MessageResponse, MessageUpdate
 from app.utils.helpers import gym_filter
+from app.utils.notifications import send_gym_notification
 
 router = APIRouter()
 
@@ -33,6 +34,29 @@ async def create_message(body: MessageCreate, gym_id: str = Depends(get_gym_admi
     }
     result = await messages_collection.insert_one(doc)
     doc["_id"] = result.inserted_id
+    # Push to mobile devices for recipients.
+    member_q = gym_filter(gym_id)
+    if body.recipient_type == "members":
+        member_q["_id"] = {"$in": [ObjectId(mid) for mid in body.recipient_member_ids or [] if ObjectId.is_valid(mid)]}
+    else:
+        member_q["status"] = "Active"
+    token_set: set[str] = set()
+    cursor = members_collection.find(member_q, {"push_tokens": 1})
+    async for m in cursor:
+        for t in m.get("push_tokens") or []:
+            token = str(t).strip()
+            if token:
+                token_set.add(token)
+    if token_set:
+        await send_gym_notification(
+            "members",
+            {
+                "tokens": list(token_set),
+                "title": body.title.strip(),
+                "body": body.body.strip(),
+                "data": {"type": "gym_message", "message_id": str(doc["_id"])},
+            },
+        )
     return MessageResponse(
         id=str(doc["_id"]),
         gym_id=doc["gym_id"],

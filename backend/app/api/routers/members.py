@@ -25,6 +25,7 @@ from app.db.database import (
 )
 from app.models.schemas import (
     MemberCreate,
+    MemberDeviceTokenUpsert,
     MemberImportResult,
     MemberResponse,
     MemberUpdate,
@@ -175,6 +176,53 @@ async def get_member_by_id(
     attendance_map = {member_id: att_doc} if att_doc else None
 
     return await doc_to_member_response(doc, attendance_map=attendance_map)
+
+
+@router.post("/members/{member_id}/device-token", response_model=dict)
+async def upsert_member_device_token(
+    member_id: str,
+    body: MemberDeviceTokenUpsert,
+    gym_id: str = Depends(get_gym_id_for_attendance_or_member_get),
+):
+    try:
+        oid = ObjectId(member_id)
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="Invalid member ID")
+
+    q = {"_id": oid}
+    q.update(gym_filter(gym_id))
+    member = await members_collection.find_one(q)
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    update_doc = {
+        "$addToSet": {"push_tokens": body.token.strip()},
+        "$set": {"push_token_updated_at": datetime.now(timezone.utc)},
+    }
+    if body.platform and body.platform.strip():
+        update_doc["$set"]["push_platform"] = body.platform.strip()
+
+    await members_collection.update_one(q, update_doc)
+    return {"message": "Device token saved"}
+
+
+@router.delete("/members/{member_id}/device-token", response_model=dict)
+async def delete_member_device_token(
+    member_id: str,
+    token: str,
+    gym_id: str = Depends(get_gym_id_for_attendance_or_member_get),
+):
+    try:
+        oid = ObjectId(member_id)
+    except InvalidId:
+        raise HTTPException(status_code=400, detail="Invalid member ID")
+    q = {"_id": oid}
+    q.update(gym_filter(gym_id))
+    member = await members_collection.find_one(q)
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+    await members_collection.update_one(q, {"$pull": {"push_tokens": token}})
+    return {"message": "Device token removed"}
 
 
 @router.get("/members/{member_id}/attendance-stats")

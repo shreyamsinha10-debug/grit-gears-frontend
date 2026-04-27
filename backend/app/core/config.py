@@ -65,6 +65,9 @@ class Settings(BaseSettings):
     from_email: str | None = Field(default=None, alias="FROM_EMAIL")
     # SendGrid API key (optional). When set, mail is sent via SendGrid HTTP API instead of SMTP (avoids port blocks in containers).
     sendgrid_api_key: str | None = Field(default=None, alias="SENDGRID_API_KEY")
+    # Firebase Cloud Messaging server key (legacy HTTP API).
+    # When not set, push delivery is skipped gracefully.
+    fcm_server_key: str | None = Field(default=None, alias="FCM_SERVER_KEY")
 
     # Base URL for password-reset and registration links (where app/web is hosted).
     # No trailing slash. Example: https://gymopshq.web.app or https://yourapp.com
