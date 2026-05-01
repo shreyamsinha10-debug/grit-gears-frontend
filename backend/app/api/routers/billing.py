@@ -9,7 +9,7 @@ from bson.errors import InvalidId
 from bson.regex import Regex
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
-from app.core.auth import get_gym_admin
+from app.core.auth import get_gym_admin, get_gym_id_for_payments
 from app.db.database import invoices_collection, members_collection, payments_collection
 from app.models.schemas import (
     BillingIssueWalkIn,
@@ -163,7 +163,7 @@ async def billing_issue(body: BillingIssueWalkIn, gym_id: str = Depends(get_gym_
 
 
 @router.get("/billing/history", response_model=list[InvoiceResponse])
-async def billing_history(member_id: str | None = None, search: str | None = None, date_from: str | None = None, date_to: str | None = None, gym_id: str = Depends(get_gym_admin), skip: int = 0, limit: int = 100):
+async def billing_history(member_id: str | None = None, search: str | None = None, date_from: str | None = None, date_to: str | None = None, gym_id: str = Depends(get_gym_id_for_payments), skip: int = 0, limit: int = 100):
     q = gym_filter(gym_id)
     if member_id:
         q["member_id"] = member_id
