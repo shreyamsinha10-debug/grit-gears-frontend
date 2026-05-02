@@ -1,5 +1,5 @@
-# Build Flutter web and deploy to Vercel (uses existing Railway backend).
-# Add secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
+# Build Flutter web and deploy to Vercel. Repo secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
+# (Vercel → Account → Tokens; Project → Settings → General for IDs.)
 name: Build and deploy web to Vercel
 
 on:
@@ -7,23 +7,47 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 env:
+  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
   VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-  # Avoid Node 20 deprecation warnings for actions/checkout until default runner updates.
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-web-vercel-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify Vercel secrets
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -z "${VERCEL_TOKEN:-}" ] && missing+=(VERCEL_TOKEN)
+          [ -z "${VERCEL_ORG_ID:-}" ] && missing+=(VERCEL_ORG_ID)
+          [ -z "${VERCEL_PROJECT_ID:-}" ] && missing+=(VERCEL_PROJECT_ID)
+          if [ "${#missing[@]}" -ne 0 ]; then
+            echo "::error::Missing Actions secrets: ${missing[*]}. Add under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+
+      - name: Trust Flutter SDK path for Git
+        run: |
+          if [ -n "${FLUTTER_ROOT:-}" ]; then
+            git config --global --add safe.directory "$FLUTTER_ROOT"
+          fi
 
       - name: Get dependencies
         run: flutter pub get
@@ -33,8 +57,6 @@ jobs:
         run: flutter build web --release
         working-directory: frontend
 
-      # Flutter is already built above; --prebuilt requires `vercel build` + .vercel/output.
-      # Publish static web output with SPA rewrites only (no remote buildCommand).
       - name: Copy vercel.json and package.json into build output
         run: |
           cp frontend/vercel.ci-static.json frontend/build/web/vercel.json
@@ -44,5 +66,5 @@ jobs:
         run: npm i -g vercel@latest
 
       - name: Deploy to Vercel
-        run: vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
+        run: vercel deploy --prod --yes
         working-directory: frontend/build/web
