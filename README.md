@@ -139,10 +139,9 @@ You can host the **Flutter web app** on Vercel and keep using your **existing ba
 
 1. Go to [vercel.com](https://vercel.com) and sign in with GitHub.
 2. **Add New** → **Project** → import your **GymSaaS** repo.
-3. Configure the project:
-   - **Root Directory**: click **Edit** → set to **`frontend`** (so Vercel uses the Flutter app).
-   - **Build Command**, **Install Command**, **Output Directory**: leave as in `frontend/vercel.json` (Vercel will use it). The install step downloads the Flutter SDK (~1 GB), so the first build can take 10–15 minutes.
-   - **Output Directory**: `build/web` (from vercel.json).
+3. Configure the project (monorepo):
+   - **Root Directory**: leave **empty** (repository root). Build settings come from **`vercel.json`** at the repo root (`bash frontend/vercel-build.sh`, output `frontend/build/web`). Do **not** set Root Directory to `frontend` unless you also override the build command in the dashboard.
+   - Clear any old **Build Command** override such as `bash vercel-build.sh` (that path only works inside `frontend/`). The first build can take 10–15 minutes while Flutter is installed.
 4. Click **Deploy**. When it finishes, you get a URL like `https://gymsaas-xxx.vercel.app`. The web app will call your Railway backend automatically.
 
 ### Option B – GitHub Actions builds and deploys to Vercel (faster, more reliable)
@@ -151,7 +150,7 @@ This avoids installing Flutter on Vercel by building in GitHub Actions and deplo
 
 1. **Create a Vercel project** (to get IDs):
    - Vercel → **Add New** → **Project** → import your repo.
-   - Set **Root Directory** to **`frontend`**.
+   - Set **Root Directory** to the **repository root** (empty), matching `vercel.json` at the repo root.
    - Deploy once (can cancel after it starts, or let it run). Go to **Project Settings** → note the **Project ID**. Under **General** or your team, note the **Org ID** (Team ID or your user id from the URL).
 
 2. **Create a Vercel token**: [vercel.com/account/tokens](https://vercel.com/account/tokens) → **Create** → copy the token.
