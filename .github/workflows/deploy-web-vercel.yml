@@ -1,5 +1,7 @@
-# Build Flutter web and deploy to Vercel. Repo secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
-# (Vercel → Account → Tokens; Project → Settings → General for IDs.)
+# Optional Vercel CLI deploy from GitHub Actions. If VERCEL_TOKEN, VERCEL_ORG_ID,
+# and VERCEL_PROJECT_ID are not all set as repository secrets, the Flutter+Vercel
+# job is skipped (workflow still succeeds). You can still deploy via Vercel’s
+# Git integration on the repo linked in the Vercel dashboard (e.g. grit-gears-frontend).
 name: Build and deploy web to Vercel
 
 on:
@@ -10,32 +12,20 @@ on:
 permissions:
   contents: read
 
-env:
-  VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   deploy:
+    if: ${{ secrets.VERCEL_TOKEN != '' && secrets.VERCEL_ORG_ID != '' && secrets.VERCEL_PROJECT_ID != '' }}
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-web-vercel-${{ github.ref }}
       cancel-in-progress: true
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
-
-      - name: Verify Vercel secrets
-        run: |
-          set -euo pipefail
-          missing=()
-          [ -z "${VERCEL_TOKEN:-}" ] && missing+=(VERCEL_TOKEN)
-          [ -z "${VERCEL_ORG_ID:-}" ] && missing+=(VERCEL_ORG_ID)
-          [ -z "${VERCEL_PROJECT_ID:-}" ] && missing+=(VERCEL_PROJECT_ID)
-          if [ "${#missing[@]}" -ne 0 ]; then
-            echo "::error::Missing Actions secrets: ${missing[*]}. Add them as repository secrets under Settings → Secrets and variables → Actions, or attach an Environment to this job and store the same names on that environment."
-            exit 1
-          fi
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -68,3 +58,11 @@ jobs:
       - name: Deploy to Vercel
         run: vercel deploy --prod --yes
         working-directory: frontend/build/web
+
+  vercel-cli-skipped:
+    if: ${{ secrets.VERCEL_TOKEN == '' || secrets.VERCEL_ORG_ID == '' || secrets.VERCEL_PROJECT_ID == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip Vercel CLI (secrets not configured)
+        run: |
+          echo "::notice::Skipping Vercel CLI deploy — add repository secrets VERCEL_TOKEN, VERCEL_ORG_ID, and VERCEL_PROJECT_ID (Settings → Secrets and variables → Actions) to run deploy from Actions. Deployments can still run when Vercel is connected to Git on another repository."
