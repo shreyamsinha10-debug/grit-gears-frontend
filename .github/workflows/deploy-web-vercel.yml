@@ -33,7 +33,7 @@ jobs:
           [ -z "${VERCEL_ORG_ID:-}" ] && missing+=(VERCEL_ORG_ID)
           [ -z "${VERCEL_PROJECT_ID:-}" ] && missing+=(VERCEL_PROJECT_ID)
           if [ "${#missing[@]}" -ne 0 ]; then
-            echo "::error::Missing Actions secrets: ${missing[*]}. Add under Settings → Secrets and variables → Actions."
+            echo "::error::Missing Actions secrets: ${missing[*]}. Add them as repository secrets under Settings → Secrets and variables → Actions, or attach an Environment to this job and store the same names on that environment."
             exit 1
           fi
 
