@@ -32,12 +32,14 @@ jobs:
         run: flutter build web --release
         working-directory: frontend
 
+      # Flutter is already built above; --prebuilt requires `vercel build` + .vercel/output.
+      # Publish static web output with SPA rewrites only (no remote buildCommand).
       - name: Copy vercel.json into build output
-        run: cp frontend/vercel.json frontend/build/web/vercel.json
+        run: cp frontend/vercel.ci-static.json frontend/build/web/vercel.json
 
       - name: Install Vercel CLI
         run: npm i -g vercel@latest
 
       - name: Deploy to Vercel
-        run: vercel deploy --prod --prebuilt --token=${{ secrets.VERCEL_TOKEN }}
+        run: vercel deploy --prod --yes --token=${{ secrets.VERCEL_TOKEN }}
         working-directory: frontend/build/web
