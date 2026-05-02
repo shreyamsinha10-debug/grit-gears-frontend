@@ -1,7 +1,7 @@
 # Optional Vercel CLI deploy from GitHub Actions. If VERCEL_TOKEN, VERCEL_ORG_ID,
-# and VERCEL_PROJECT_ID are not all set as repository secrets, the Flutter+Vercel
-# job is skipped (workflow still succeeds). You can still deploy via Vercel’s
-# Git integration on the repo linked in the Vercel dashboard (e.g. grit-gears-frontend).
+# and VERCEL_PROJECT_ID are not all set as repository secrets, Flutter/Vercel
+# steps are skipped (workflow still succeeds). Job-level `if:` cannot use the
+# `secrets` context on all runners; detection is done in a step instead.
 name: Build and deploy web to Vercel
 
 on:
@@ -14,55 +14,72 @@ permissions:
 
 jobs:
   deploy:
-    if: ${{ secrets.VERCEL_TOKEN != '' && secrets.VERCEL_ORG_ID != '' && secrets.VERCEL_PROJECT_ID != '' }}
     runs-on: ubuntu-latest
     concurrency:
       group: deploy-web-vercel-${{ github.ref }}
       cancel-in-progress: true
     env:
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
 
+      - name: Detect Vercel secrets
+        id: vercel
+        env:
+          VT: ${{ secrets.VERCEL_TOKEN }}
+          VO: ${{ secrets.VERCEL_ORG_ID }}
+          VP: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          if [ -n "$VT" ] && [ -n "$VO" ] && [ -n "$VP" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip Vercel CLI (secrets not configured)
+        if: steps.vercel.outputs.ready != 'true'
+        run: |
+          echo "::notice::Skipping Vercel CLI deploy — add repository secrets VERCEL_TOKEN, VERCEL_ORG_ID, and VERCEL_PROJECT_ID (Settings → Secrets and variables → Actions) to run deploy from Actions. Deployments can still run when Vercel is connected to Git on another repository."
+
       - name: Set up Flutter
+        if: steps.vercel.outputs.ready == 'true'
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
 
       - name: Trust Flutter SDK path for Git
+        if: steps.vercel.outputs.ready == 'true'
         run: |
           if [ -n "${FLUTTER_ROOT:-}" ]; then
             git config --global --add safe.directory "$FLUTTER_ROOT"
           fi
 
       - name: Get dependencies
+        if: steps.vercel.outputs.ready == 'true'
         run: flutter pub get
         working-directory: frontend
 
       - name: Build web
+        if: steps.vercel.outputs.ready == 'true'
         run: flutter build web --release
         working-directory: frontend
 
       - name: Copy vercel.json and package.json into build output
+        if: steps.vercel.outputs.ready == 'true'
         run: |
           cp frontend/vercel.ci-static.json frontend/build/web/vercel.json
           cp frontend/package.ci-web.json frontend/build/web/package.json
 
       - name: Install Vercel CLI
+        if: steps.vercel.outputs.ready == 'true'
         run: npm i -g vercel@latest
 
       - name: Deploy to Vercel
+        if: steps.vercel.outputs.ready == 'true'
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: vercel deploy --prod --yes
         working-directory: frontend/build/web
-
-  vercel-cli-skipped:
-    if: ${{ secrets.VERCEL_TOKEN == '' || secrets.VERCEL_ORG_ID == '' || secrets.VERCEL_PROJECT_ID == '' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Skip Vercel CLI (secrets not configured)
-        run: |
-          echo "::notice::Skipping Vercel CLI deploy — add repository secrets VERCEL_TOKEN, VERCEL_ORG_ID, and VERCEL_PROJECT_ID (Settings → Secrets and variables → Actions) to run deploy from Actions. Deployments can still run when Vercel is connected to Git on another repository."
