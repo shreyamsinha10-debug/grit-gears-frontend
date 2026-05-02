@@ -19,6 +19,7 @@ import '../models/models.dart';
 import '../theme/app_theme.dart';
 import 'admin_dashboard_screen.dart';
 import 'member_home_screen.dart';
+import 'sign_up_screen.dart';
 import 'super_admin_screen.dart';
 
 /// Single login screen: Email or Mobile + Password. Routes to Admin or Member based on credentials.
@@ -675,6 +676,36 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                 ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'New here?',
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      color: isDark ? Colors.grey.shade300 : Colors.grey.shade700,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _loading
+                        ? null
+                        : () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => const SignUpScreen()),
+                            );
+                          },
+                    child: Text(
+                      'Sign up',
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
