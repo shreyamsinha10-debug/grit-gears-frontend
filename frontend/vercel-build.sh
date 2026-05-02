@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -e
+cd "$(dirname "${BASH_SOURCE[0]}")"
 # Avoid exit 128 from Flutter's internal git calls on Vercel (no git config)
 git config --global user.email "build@vercel.app" 2>/dev/null || true
 git config --global user.name "Vercel" 2>/dev/null || true
