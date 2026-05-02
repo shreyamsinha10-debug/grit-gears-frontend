@@ -34,8 +34,10 @@ jobs:
 
       # Flutter is already built above; --prebuilt requires `vercel build` + .vercel/output.
       # Publish static web output with SPA rewrites only (no remote buildCommand).
-      - name: Copy vercel.json into build output
-        run: cp frontend/vercel.ci-static.json frontend/build/web/vercel.json
+      - name: Copy vercel.json and package.json into build output
+        run: |
+          cp frontend/vercel.ci-static.json frontend/build/web/vercel.json
+          cp frontend/package.ci-web.json frontend/build/web/package.json
 
       - name: Install Vercel CLI
         run: npm i -g vercel@latest
